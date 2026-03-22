@@ -120,46 +120,46 @@ FastAPI 会直接托管 `src/jelly_weaver/static/` 下的前端构建产物。
 
 ### 1. 基础启动验证
 
-- [ ] 打开浏览器，页面正常渲染
-- [ ] 顶部状态栏显示 "WebSocket connected"（绿色圆点）
-- [ ] 点击 "Refresh" 按钮不报错
+- [x] 打开浏览器，页面正常渲染
+- [x] 顶部状态栏显示 "WebSocket connected"（绿色圆点）
+- [x] 点击 "Refresh" 按钮不报错
 
 ### 2. Settings 配置
 
-- [ ] 点击 "Settings" 按钮
-- [ ] 填入 API Base（如 `https://api.deepseek.com/v1`）
-- [ ] 填入 Model（如 `deepseek-chat`）
-- [ ] 填入 API Key
-- [ ] 点击 "Save"
-- [ ] 再次打开 Settings，确认 API Key 显示为 `sk-xxx...xxxx` 格式的遮掩值
+- [x] 点击 "Settings" 按钮
+- [x] 填入 API Base（如 `https://api.deepseek.com/v1`）
+- [x] 填入 Model（如 `deepseek-chat`）
+- [x] 填入 API Key
+- [x] 点击 "Save"
+- [x] 再次打开 Settings，确认 API Key 显示为 `sk-xxx...xxxx` 格式的遮掩值
 
 ### 3. 添加源目录
 
-- [ ] 点击 "Add Source" 按钮
-- [ ] 在目录选择器中导航到一个包含 PT 下载文件夹的目录
-- [ ] 点击 "Select current" 选中该目录
-- [ ] 源面板出现该目录，并列出其下的子文件夹条目
-- [ ] 每个条目显示文件数量和状态（pending）
+- [x] 点击 "Add Source" 按钮
+- [x] 在目录选择器中导航到一个包含 PT 下载文件夹的目录
+- [x] 点击 "Select current" 选中该目录
+- [x] 源面板出现该目录，并列出其下的子文件夹条目
+- [x] 每个条目显示文件数量和状态（pending）
 
 ### 4. 添加目标库
 
-- [ ] 点击右侧 "Add Library" 按钮
-- [ ] 修改 Library 名称（如 "Movies"）
-- [ ] 选择 Media type（movies 或 tv）
-- [ ] 点击 "Browse" 选择目标目录路径
-- [ ] 目标面板显示该库的现有子目录
+- [x] 点击右侧 "Add Library" 按钮
+- [x] 修改 Library 名称（如 "Movies"）
+- [x] 选择 Media type（movies 或 tv）
+- [x] 点击 "Browse" 选择目标目录路径
+- [x] 目标面板显示该库的现有子目录
 
 ### 5. 拖拽 → 解析 → 确认 → 链接
 
-- [ ] 从源面板拖拽一个条目到目标库的放置区
-- [ ] 等待 LLM 解析（如果已配置 API Key）
-- [ ] 弹出确认对话框，显示解析结果（类型、英文标题、中文标题、年份）
-- [ ] 可以手动编辑各字段
-- [ ] 底部预览显示目标文件夹名：`Title (Year)`
-- [ ] 点击 "Start link"
-- [ ] 右下角出现进度条，显示链接进度
-- [ ] 完成后，源面板中该条目状态变为 linked（绿色圆点）
-- [ ] 目标库的 "Existing folders" 列表中出现新创建的文件夹
+- [x] 从源面板拖拽一个条目到目标库的放置区
+- [x] 等待 LLM 解析（如果已配置 API Key）
+- [x] 弹出确认对话框，显示解析结果（类型、英文标题、中文标题、年份）
+- [x] 可以手动编辑各字段
+- [x] 底部预览显示目标文件夹名：`Title (Year)`
+- [x] 点击 "Start link"
+- [x] 右下角出现进度条，显示链接进度
+- [x] 完成后，源面板中该条目状态变为 linked（绿色圆点）
+- [x] 目标库的 "Existing folders" 列表中出现新创建的文件夹
 
 ### 6. 忽略/取消忽略
 

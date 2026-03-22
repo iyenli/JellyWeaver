@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from jelly_weaver.api.deps import get_state, get_llm
 from jelly_weaver.api.ws import manager
 from jelly_weaver.core.models import EntryRecord, EntryStatus
-from jelly_weaver.core.hardlink import link_movie, link_tv_show
+from jelly_weaver.core.hardlink import link_movie, link_tv_show, unlink_target
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ops", tags=["operations"])
@@ -30,6 +30,10 @@ class LinkBody(BaseModel):
     title_en: str
     title_zh: str = ""
     year: int
+
+
+class UnlinkBody(BaseModel):
+    target_folder_path: str
 
 
 @router.post("/parse")
@@ -113,3 +117,30 @@ async def _run_link(task_id, link_func, src, dst, source_key, st):
             "task_id": task_id,
             "error": str(e),
         })
+
+
+@router.post("/unlink")
+async def unlink_folder(body: UnlinkBody):
+    """Remove a hardlinked target folder and reset the source entry to pending."""
+    target_path = Path(body.target_folder_path)
+    if not target_path.is_dir():
+        raise HTTPException(404, f"Target folder not found: {body.target_folder_path}")
+
+    # Find the source entry that produced this target folder
+    st = get_state()
+    source_key = None
+    for key, rec in st.state.entries.items():
+        if rec.target_path and Path(rec.target_path) == target_path:
+            source_key = key
+            break
+
+    # Remove the hardlinked folder from disk
+    removed = await asyncio.to_thread(unlink_target, target_path)
+
+    # Reset source entry to pending
+    if source_key:
+        st.upsert_entry(source_key, EntryRecord(status=EntryStatus.PENDING))
+
+    await manager.broadcast({"type": "state_changed", "scope": "entries"})
+    await manager.broadcast({"type": "state_changed", "scope": "targets"})
+    return {"ok": True, "removed_files": removed, "source_key": source_key}

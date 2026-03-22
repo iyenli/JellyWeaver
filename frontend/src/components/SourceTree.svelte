@@ -17,6 +17,8 @@
 		return true;
 	}
 
+	$: visibleEntries = entries.filter(isVisible);
+
 	function statusClass(status: EntryItem['status']) {
 		if (status === 'linked') return 'bg-[var(--green)]';
 		if (status === 'ignored') return 'bg-[var(--overlay0)]';
@@ -40,7 +42,7 @@
 </script>
 
 <div class="space-y-2">
-	{#each entries.filter(isVisible) as entry (entry.path)}
+	{#each visibleEntries as entry (entry.path)}
 		<div
 			class="flex items-center gap-3 rounded-xl border border-[var(--surface0)] bg-[var(--mantle)] px-3 py-2 transition hover:border-[var(--surface1)] hover:bg-[var(--surface0)]"
 			role="button"
@@ -80,7 +82,7 @@
 		</div>
 	{/each}
 
-	{#if entries.filter(isVisible).length === 0}
+	{#if visibleEntries.length === 0}
 		<div class="rounded-xl border border-dashed border-[var(--surface1)] px-4 py-6 text-center text-sm text-[var(--subtext0)]">
 			No entries to show
 		</div>

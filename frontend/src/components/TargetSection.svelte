@@ -8,6 +8,8 @@
 	export let onRemove: () => void | Promise<void> = () => {};
 	export let onPickPath: () => void = () => {};
 	export let onDropSource: (sourcePath: string) => void | Promise<void> = () => {};
+	export let onUnlink: (targetFolderPath: string) => void | Promise<void> = () => {};
+	export let onReparse: (targetFolderPath: string, folderName: string) => void | Promise<void> = () => {};
 
 	function handleDrop(event: DragEvent) {
 		event.preventDefault();
@@ -81,8 +83,28 @@
 		{#if items.length > 0}
 			<div class="max-h-40 space-y-2 overflow-auto pr-1">
 				{#each items as item (item.path)}
-					<div class="truncate rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2 text-sm">
-						{item.name}
+					<div class="flex items-center gap-2 rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2 text-sm">
+						<span class="min-w-0 flex-1 truncate">{item.name}</span>
+						<button
+							class="shrink-0 rounded-md p-1 text-[var(--subtext0)] hover:bg-[var(--surface1)] hover:text-[var(--mauve)]"
+							title="Re-parse with AI"
+							onclick={() => onReparse(item.path, item.name)}
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+								<path d="M4.464 3.162A2 2 0 0 1 6.28 2h7.44a2 2 0 0 1 1.816 1.162l1.154 2.5c.203.44.31.921.31 1.408v1.825a2.91 2.91 0 0 0-1-.175c-1.615 0-2.94 1.267-3 2.857V13.5a.5.5 0 0 1-.5.5H7.5a.5.5 0 0 1-.5-.5v-1.923C7 10.025 5.675 8.757 4.06 8.757A2.91 2.91 0 0 0 3 8.945V7.07c0-.487.107-.968.31-1.408l1.154-2.5Z" />
+								<path d="M1.06 10.757C1.06 9.787 1.846 9 2.817 9h1.243c.971 0 1.757.787 1.757 1.757v.486c0 .97-.786 1.757-1.757 1.757H2.817c-.97 0-1.757-.787-1.757-1.757v-.486ZM14.183 9c-.97 0-1.757.787-1.757 1.757v.486c0 .97.787 1.757 1.757 1.757h1.243c.971 0 1.757-.787 1.757-1.757v-.486c0-.97-.786-1.757-1.757-1.757h-1.243Z" />
+								<path d="M6.5 15.5a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 .5.5v1a2.5 2.5 0 0 1-2.5 2.5h-2A2.5 2.5 0 0 1 6.5 16.5v-1Z" />
+							</svg>
+						</button>
+						<button
+							class="shrink-0 rounded-md p-1 text-[var(--subtext0)] hover:bg-[var(--surface1)] hover:text-[var(--red)]"
+							title="Return to sources (unlink)"
+							onclick={() => onUnlink(item.path)}
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+								<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+							</svg>
+						</button>
 					</div>
 				{/each}
 			</div>

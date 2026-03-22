@@ -90,6 +90,7 @@ export const api = {
 	listDir: (path: string) => request<FsListResponse>(`/api/fs/list?path=${encodeURIComponent(path)}`),
 	parseFolder: (name: string, hint?: string) => request<ParseResult>('/api/ops/parse', { method: 'POST', body: JSON.stringify({ name, hint }) }),
 	startLink: (body: LinkRequest) => request<{ task_id: string; target_path: string }>('/api/ops/link', { method: 'POST', body: JSON.stringify(body) }),
+	unlinkFolder: (targetFolderPath: string) => request<{ ok: boolean; removed_files: number; source_key: string | null }>('/api/ops/unlink', { method: 'POST', body: JSON.stringify({ target_folder_path: targetFolderPath }) }),
 	openStateDir: () => request('/api/settings/open-state-dir', { method: 'POST' }),
 	llmCheck: () => request<LlmCheckResult>('/api/settings/llm-check', { method: 'POST' })
 };

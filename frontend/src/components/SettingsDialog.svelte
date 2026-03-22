@@ -10,10 +10,23 @@
 	let draft = { api_base: '', model: '', api_key: '' };
 	let llmStatus: LlmCheckResult | null = null;
 	let llmChecking = false;
+	let prevOpen = false;
 
-	$: if (open) {
-		draft = { api_base: value.api_base ?? '', model: value.model ?? '', api_key: '' };
-		llmStatus = null;
+	$: if (open !== prevOpen) {
+		prevOpen = open;
+		if (open) {
+			draft = { api_base: value.api_base ?? '', model: value.model ?? '', api_key: '' };
+			llmStatus = null;
+		}
+	}
+
+	// Handle late-arriving settings data: if dialog is open and draft is still empty
+	// but value now has real data, update draft without wiping user edits
+	$: if (open && !draft.api_base && value.api_base) {
+		draft.api_base = value.api_base;
+	}
+	$: if (open && !draft.model && value.model) {
+		draft.model = value.model;
 	}
 
 	async function handleLlmCheck() {

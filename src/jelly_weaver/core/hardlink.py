@@ -1,6 +1,7 @@
 """Hardlink engine: create hardlinks from source to Jellyfin-standard target."""
 
 import os
+import shutil
 from pathlib import Path
 
 from .models import LinkResult, SourceStructure
@@ -117,3 +118,15 @@ def link_tv_show(
                     progress_cb(count, total)
 
     return result
+
+
+def unlink_target(target_dir: Path) -> int:
+    """Remove a hardlinked target directory. Returns the number of files removed.
+
+    Since these are hardlinks, removing them does not delete the original source files.
+    """
+    if not target_dir.is_dir():
+        return 0
+    count = sum(1 for f in target_dir.rglob("*") if f.is_file())
+    shutil.rmtree(target_dir)
+    return count

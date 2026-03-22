@@ -283,6 +283,45 @@
 			}}
 			onPickPath={(id) => openDirPicker('target', id)}
 			onDropSource={handleDropSource}
+			onUnlink={async (targetFolderPath) => {
+				try {
+					await api.unlinkFolder(targetFolderPath);
+					await refreshSources();
+					await refreshTargets();
+					setToast('success', 'Unlinked and returned to sources');
+				} catch (error) {
+					setToast('error', error instanceof Error ? error.message : 'Unlink failed');
+				}
+			}}
+			onReparse={async (targetFolderPath, folderName, sectionId) => {
+				// First unlink the existing folder
+				let sourceKey: string | null = null;
+				try {
+					const result = await api.unlinkFolder(targetFolderPath);
+					sourceKey = result.source_key;
+					await refreshSources();
+					await refreshTargets();
+				} catch (error) {
+					setToast('error', error instanceof Error ? error.message : 'Unlink failed');
+					return;
+				}
+				// Re-parse the folder name with AI
+				const target = $targets.find((t) => t.id === sectionId);
+				const hint = target?.media_type === 'movies' ? 'movie' : 'tv';
+				try {
+					const parsed = await api.parseFolder(folderName, hint);
+					pendingParse.set(parsed);
+				} catch {
+					pendingParse.set({ ...emptyParse(folderName), media_type: hint === 'movie' ? 'movie' : 'tv' });
+				}
+				if (sourceKey) {
+					pendingSourcePath.set(sourceKey);
+				}
+				pendingSectionId.set(sectionId);
+				selectedTargetId.set(sectionId);
+				activeSectionId = sectionId;
+				confirmOpen.set(true);
+			}}
 		/>
 	</div>
 </AppShell>
