@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 2
 _TIMEOUT = 30
+_HEALTH_TIMEOUT = 10
 
 
 class LLMClient:
@@ -27,6 +28,8 @@ class LLMClient:
             api_key=api_key,
             timeout=_TIMEOUT,
         )
+        self._api_base = api_base
+        self._api_key = api_key
         self._model = model
 
     def parse_folder_name(
@@ -63,6 +66,24 @@ class LLMClient:
                 logger.error("LLM unexpected error: %s", e)
                 return None
         return None
+
+    def health_check(self) -> bool:
+        """Test connectivity with a minimal API call."""
+        try:
+            health_client = OpenAI(
+                base_url=self._api_base,
+                api_key=self._api_key,
+                timeout=_HEALTH_TIMEOUT,
+            )
+            resp = health_client.chat.completions.create(
+                model=self._model,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+            )
+            return bool(resp.choices)
+        except Exception as e:
+            logger.warning("LLM health check failed: %s", e)
+            raise
 
     @staticmethod
     def _parse_response(content: str) -> LLMResult | None:

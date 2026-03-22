@@ -34,6 +34,15 @@ export interface Settings {
 	api_key: string;
 	api_key_configured: boolean;
 	api_key_preview: string;
+	state_file_path?: string;
+	state_file_exists?: boolean;
+	llm_settings_file_path?: string;
+}
+
+export interface LlmCheckResult {
+	configured: boolean;
+	ok: boolean;
+	error: string | null;
 }
 
 export interface FsItem {

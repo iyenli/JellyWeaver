@@ -54,8 +54,8 @@
 				value={section.media_type}
 				onchange={(event) => onChange({ media_type: (event.currentTarget as HTMLSelectElement).value as TargetSectionType['media_type'] })}
 			>
-				<option value="movies">movies</option>
-				<option value="tv">tv</option>
+				<option value="movies">Movies</option>
+				<option value="tv">TV</option>
 			</select>
 		</label>
 	</div>

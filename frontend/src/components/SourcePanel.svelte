@@ -6,14 +6,17 @@
 	export let showCompleted = false;
 	export let showIgnored = false;
 	export let loading = false;
+	export let searchText = '';
 	export let onAddSource: () => void = () => {};
 	export let onRemoveSource: (path: string) => void | Promise<void> = () => {};
 	export let onToggleIgnored: (path: string, nextIgnored: boolean) => void | Promise<void> = () => {};
+	export let onSmartAdd: (path: string) => void | Promise<void> = () => {};
 	export let onShowCompletedChange: (value: boolean) => void = () => {};
 	export let onShowIgnoredChange: (value: boolean) => void = () => {};
+	export let onSearchChange: (value: string) => void = () => {};
 </script>
 
-<section class="flex min-h-[70vh] flex-col rounded-2xl border border-[var(--surface0)] bg-[var(--mantle)] p-4 shadow-lg shadow-black/20">
+<section class="sticky top-4 flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border border-[var(--surface0)] bg-[var(--mantle)] p-4 shadow-lg shadow-black/20">
 	<div class="mb-4 flex items-center justify-between gap-3">
 		<div>
 			<h2 class="text-lg font-semibold">Sources</h2>
@@ -24,7 +27,16 @@
 		</button>
 	</div>
 
-	<div class="mb-4 flex flex-wrap gap-4 text-sm text-[var(--subtext0)]">
+	<div class="mb-3">
+		<input
+			class="w-full rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--overlay0)]"
+			placeholder="Search entries..."
+			value={searchText}
+			oninput={(event) => onSearchChange((event.currentTarget as HTMLInputElement).value)}
+		/>
+	</div>
+
+	<div class="mb-3 flex flex-wrap gap-4 text-sm text-[var(--subtext0)]">
 		<label class="flex items-center gap-2">
 			<input type="checkbox" checked={showCompleted} onchange={(event) => onShowCompletedChange((event.currentTarget as HTMLInputElement).checked)} />
 			<span>Show completed</span>
@@ -54,7 +66,7 @@
 					</button>
 				</div>
 
-				<SourceTree {showCompleted} {showIgnored} entries={source.entries} {onToggleIgnored} />
+				<SourceTree {showCompleted} {showIgnored} {searchText} entries={source.entries} {onToggleIgnored} {onSmartAdd} />
 			</div>
 		{/each}
 

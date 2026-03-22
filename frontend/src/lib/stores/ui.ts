@@ -3,6 +3,7 @@ import type { ParseResult } from '$lib/types';
 
 export const showCompleted = writable(false);
 export const showIgnored = writable(false);
+export const sourceSearch = writable('');
 export const dirPickerOpen = writable(false);
 export const settingsOpen = writable(false);
 export const confirmOpen = writable(false);

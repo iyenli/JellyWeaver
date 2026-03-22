@@ -4,11 +4,16 @@
 	export let entries: EntryItem[] = [];
 	export let showCompleted = false;
 	export let showIgnored = false;
+	export let searchText = '';
 	export let onToggleIgnored: (path: string, nextIgnored: boolean) => void | Promise<void> = () => {};
+	export let onSmartAdd: (path: string) => void | Promise<void> = () => {};
+
+	let smartAddLoading = '';
 
 	function isVisible(entry: EntryItem) {
 		if (entry.status === 'linked' && !showCompleted) return false;
 		if (entry.status === 'ignored' && !showIgnored) return false;
+		if (searchText && !entry.name.toLowerCase().includes(searchText.toLowerCase())) return false;
 		return true;
 	}
 
@@ -23,6 +28,15 @@
 		event.dataTransfer?.setData('application/x-jelly-weaver-path', path);
 		event.dataTransfer!.effectAllowed = 'copy';
 	}
+
+	async function handleSmartAdd(path: string) {
+		smartAddLoading = path;
+		try {
+			await onSmartAdd(path);
+		} finally {
+			smartAddLoading = '';
+		}
+	}
 </script>
 
 <div class="space-y-2">
@@ -35,7 +49,7 @@
 			draggable={entry.status !== 'ignored'}
 			ondragstart={(event) => handleDragStart(event, entry.path)}
 		>
-			<span class={`h-2.5 w-2.5 rounded-full ${statusClass(entry.status)}`}></span>
+			<span class={`h-2.5 w-2.5 shrink-0 rounded-full ${statusClass(entry.status)}`}></span>
 			<div class="min-w-0 flex-1">
 				<div class="truncate text-sm font-medium">{entry.name}</div>
 				<div class="truncate text-xs text-[var(--subtext0)]">
@@ -45,12 +59,24 @@
 					{/if}
 				</div>
 			</div>
-			<button
-				class="rounded-md border border-[var(--surface1)] px-2 py-1 text-xs text-[var(--subtext0)] hover:bg-[var(--surface1)]"
-				onclick={() => onToggleIgnored(entry.path, entry.status !== 'ignored')}
-			>
-				{entry.status === 'ignored' ? 'Unignore' : 'Ignore'}
-			</button>
+			<div class="flex shrink-0 gap-1">
+				{#if entry.status === 'pending'}
+					<button
+						class="rounded-md border border-[var(--mauve)]/30 px-2 py-1 text-xs text-[var(--mauve)] hover:bg-[var(--mauve)]/10 disabled:opacity-40"
+						title="Smart Add — AI auto-select library"
+						disabled={smartAddLoading === entry.path}
+						onclick={() => handleSmartAdd(entry.path)}
+					>
+						{smartAddLoading === entry.path ? '...' : '✦'}
+					</button>
+				{/if}
+				<button
+					class="rounded-md border border-[var(--surface1)] px-2 py-1 text-xs text-[var(--subtext0)] hover:bg-[var(--surface1)]"
+					onclick={() => onToggleIgnored(entry.path, entry.status !== 'ignored')}
+				>
+					{entry.status === 'ignored' ? 'Unignore' : 'Ignore'}
+				</button>
+			</div>
 		</div>
 	{/each}
 

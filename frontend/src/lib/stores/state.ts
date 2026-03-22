@@ -21,7 +21,7 @@ export async function refreshSources() {
 					name: item.name,
 					file_count: item.file_count,
 					status: item.status,
-					target_path: recordMap.get(item.path)?.target_path ?? null,
+					target_path: item.target_path ?? recordMap.get(item.path)?.target_path ?? null,
 					linked_at: recordMap.get(item.path)?.linked_at ?? null
 				}));
 				return { path: source.path, entries };
@@ -43,6 +43,9 @@ export async function refreshTargets() {
 		)
 	);
 	targetContents.set(contents);
+
+	// Re-reconcile sources against updated target contents
+	await refreshSources();
 }
 
 export async function refreshSettings() {
@@ -50,5 +53,5 @@ export async function refreshSettings() {
 }
 
 export async function refreshAll() {
-	await Promise.all([refreshSources(), refreshTargets(), refreshSettings()]);
+	await Promise.all([refreshTargets(), refreshSettings()]);
 }

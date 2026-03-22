@@ -22,6 +22,7 @@
 		settingsOpen,
 		showCompleted,
 		showIgnored,
+		sourceSearch,
 		toast
 	} from '$lib/stores/ui';
 	import type { FsItem, ParseResult, Settings, WsMessage } from '$lib/types';
@@ -32,7 +33,9 @@
 		model: '',
 		api_key: '',
 		api_key_configured: false,
-		api_key_preview: ''
+		api_key_preview: '',
+		state_file_path: '',
+		state_file_exists: false
 	};
 
 	function emptyParse(title = ''): ParseResult {
@@ -137,6 +140,40 @@
 		}
 	}
 
+	async function handleSmartAdd(sourcePath: string) {
+		const sourceName = sourcePath.split(/[/\\]/).at(-1) ?? sourcePath;
+		try {
+			const parsed = await api.parseFolder(sourceName);
+			// Auto-select matching target library
+			const targetMediaType = parsed.media_type === 'movie' ? 'movies' : 'tv';
+			const matchingTarget = get(targets).find((t) => t.media_type === targetMediaType);
+			if (!matchingTarget) {
+				setToast('error', `No library configured for type "${parsed.media_type}" — add one first`);
+				return;
+			}
+			pendingSourcePath.set(sourcePath);
+			pendingSectionId.set(matchingTarget.id);
+			selectedTargetId.set(matchingTarget.id);
+			activeSectionId = matchingTarget.id;
+			pendingParse.set(parsed);
+			confirmOpen.set(true);
+		} catch {
+			// LLM failed — fall back: pick first target if available
+			const firstTarget = get(targets)[0];
+			if (!firstTarget) {
+				setToast('error', 'No libraries configured — add one first');
+				return;
+			}
+			const hint = firstTarget.media_type === 'movies' ? 'movie' : 'tv';
+			pendingSourcePath.set(sourcePath);
+			pendingSectionId.set(firstTarget.id);
+			selectedTargetId.set(firstTarget.id);
+			activeSectionId = firstTarget.id;
+			pendingParse.set({ ...emptyParse(sourceName), media_type: hint === 'movie' ? 'movie' : 'tv' });
+			confirmOpen.set(true);
+		}
+	}
+
 	async function handleWsMessage(message: WsMessage) {
 		if (message.type === 'link_progress') {
 			progress.set({ taskId: message.task_id, current: message.current, total: message.total });
@@ -185,11 +222,12 @@
 </script>
 
 <AppShell {wsConnected} onRefresh={() => refreshAll()} onOpenSettings={() => settingsOpen.set(true)}>
-	<div class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+	<div class="grid gap-6 xl:grid-cols-2 xl:items-start">
 		<SourcePanel
 			sources={$sources}
 			showCompleted={$showCompleted}
 			showIgnored={$showIgnored}
+			searchText={$sourceSearch}
 			loading={$loading}
 			onAddSource={() => openDirPicker('source')}
 			onRemoveSource={async (path) => {
@@ -211,6 +249,8 @@
 			}}
 			onShowCompletedChange={(value) => showCompleted.set(value)}
 			onShowIgnoredChange={(value) => showIgnored.set(value)}
+			onSearchChange={(value) => sourceSearch.set(value)}
+			onSmartAdd={handleSmartAdd}
 		/>
 
 		<TargetPanel
@@ -263,6 +303,7 @@
 	open={$confirmOpen}
 	sourceName={$pendingSourcePath?.split(/[/\\]/).at(-1) ?? ''}
 	value={$pendingParse ?? emptyParse($pendingSourcePath?.split(/[/\\]/).at(-1) ?? '')}
+	targetMediaType={$targets.find((t) => t.id === ($pendingSectionId ?? $selectedTargetId))?.media_type ?? null}
 	onClose={() => {
 		confirmOpen.set(false);
 		clearPendingState();

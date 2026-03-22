@@ -2,6 +2,7 @@ import type {
 	EntryStatus,
 	FsListResponse,
 	LinkRequest,
+	LlmCheckResult,
 	ParseResult,
 	Settings,
 	TargetContentItem,
@@ -21,6 +22,7 @@ interface ScannedEntry {
 	name: string;
 	file_count: number;
 	status: EntryStatus;
+	target_path?: string | null;
 }
 
 function basename(path: string) {
@@ -87,5 +89,7 @@ export const api = {
 	listRoots: () => request<{ roots: string[]; home: string }>('/api/fs/roots'),
 	listDir: (path: string) => request<FsListResponse>(`/api/fs/list?path=${encodeURIComponent(path)}`),
 	parseFolder: (name: string, hint?: string) => request<ParseResult>('/api/ops/parse', { method: 'POST', body: JSON.stringify({ name, hint }) }),
-	startLink: (body: LinkRequest) => request<{ task_id: string; target_path: string }>('/api/ops/link', { method: 'POST', body: JSON.stringify(body) })
+	startLink: (body: LinkRequest) => request<{ task_id: string; target_path: string }>('/api/ops/link', { method: 'POST', body: JSON.stringify(body) }),
+	openStateDir: () => request('/api/settings/open-state-dir', { method: 'POST' }),
+	llmCheck: () => request<LlmCheckResult>('/api/settings/llm-check', { method: 'POST' })
 };

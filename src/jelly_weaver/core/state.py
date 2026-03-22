@@ -8,12 +8,20 @@ from .models import AppState, EntryRecord, EntryStatus, TargetSection
 
 STATE_DIR = Path.home() / ".jelly-weaver"
 STATE_FILE = STATE_DIR / "state.json"
+LLM_SETTINGS_FILE = STATE_DIR / "llm_settings.json"
+
+_DEFAULT_LLM_SETTINGS = {
+    "api_base": "https://api.deepseek.com/v1",
+    "api_key": "",
+    "model": "deepseek-chat",
+}
 
 
 class StateManager:
     def __init__(self, path: Path = STATE_FILE):
         self._path = path
         self._state: AppState | None = None
+        self._llm_settings: dict | None = None
 
     @property
     def state(self) -> AppState:
@@ -27,6 +35,9 @@ class StateManager:
             self._state = self._deserialize(raw)
         else:
             self._state = AppState()
+
+        # Migrate LLM settings from state.json to separate file if needed
+        self._migrate_llm_settings()
         return self._state
 
     def save(self) -> None:
@@ -36,6 +47,44 @@ class StateManager:
             json.dumps(data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    # --- LLM settings (separate file) ---
+
+    def _migrate_llm_settings(self) -> None:
+        """Migrate LLM settings from state.json to llm_settings.json."""
+        if LLM_SETTINGS_FILE.exists():
+            return
+        # If state has non-default settings, migrate them
+        old = self.state.settings
+        if old and old.get("api_key"):
+            self._save_llm_settings(old)
+            # Clear from state and re-save
+            self.state.settings = {}
+            self.save()
+
+    def load_llm_settings(self) -> dict:
+        if self._llm_settings is not None:
+            return self._llm_settings
+        if LLM_SETTINGS_FILE.exists():
+            self._llm_settings = json.loads(
+                LLM_SETTINGS_FILE.read_text("utf-8")
+            )
+        else:
+            self._llm_settings = dict(_DEFAULT_LLM_SETTINGS)
+        return self._llm_settings
+
+    def _save_llm_settings(self, settings: dict) -> None:
+        LLM_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LLM_SETTINGS_FILE.write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self._llm_settings = settings
+
+    def update_llm_setting(self, key: str, value: str) -> None:
+        settings = self.load_llm_settings()
+        settings[key] = value
+        self._save_llm_settings(settings)
 
     # --- CRUD helpers ---
 
@@ -110,7 +159,6 @@ class StateManager:
             "sources": state.sources,
             "target_sections": sections,
             "entries": entries,
-            "settings": state.settings,
         }
 
     @staticmethod
@@ -149,5 +197,5 @@ class StateManager:
             sources=raw.get("sources", []),
             target_sections=sections,
             entries=entries,
-            settings=raw.get("settings", AppState().settings),
+            settings=raw.get("settings", {}),
         )

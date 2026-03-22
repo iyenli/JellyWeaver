@@ -17,7 +17,7 @@ def get_state() -> StateManager:
 def get_llm() -> LLMClient | None:
     """Return LLMClient if API key is configured, else None."""
     global _llm_client
-    settings = get_state().state.settings
+    settings = get_state().load_llm_settings()
     api_key = settings.get("api_key", "")
     if not api_key:
         return None
