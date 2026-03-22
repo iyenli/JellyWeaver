@@ -22,6 +22,14 @@ class SourceStructure(Enum):
     SIMPLE = "simple"
 
 
+class StructureType(str, Enum):
+    TV_SINGLE_SEASON = "tv_single_season"
+    TV_MULTI_SEASON = "tv_multi_season"
+    MOVIE_SINGLE = "movie_single"
+    MOVIE_COLLECTION = "movie_collection"
+    UNKNOWN = "unknown"
+
+
 @dataclass
 class LLMResult:
     media_type: MediaType
@@ -52,6 +60,21 @@ class LinkResult:
     linked: int = 0
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PlanItem:
+    source_subdir: str
+    target_subdir: str
+    title_en: str = ""
+    year: int = 0
+    file_count: int = 0
+
+
+@dataclass
+class LinkPlan:
+    structure_type: StructureType
+    items: list[PlanItem] = field(default_factory=list)
 
 
 @dataclass

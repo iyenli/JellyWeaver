@@ -120,6 +120,58 @@ def link_tv_show(
     return result
 
 
+def link_with_plan(
+    src: Path,
+    dst: Path,
+    progress_cb=None,
+    *,
+    plan_items: list[dict],
+    title_en: str,
+    year: int,
+) -> LinkResult:
+    """Hardlink files using an LLM-generated link plan.
+
+    For movie_collection: each item with title_en creates its own Title (Year)/ folder.
+    For TV/other: creates title_en (year)/ under dst, then maps source_subdir -> target_subdir.
+    """
+    _check_same_device(src, dst)
+    result = LinkResult()
+
+    is_collection = any(item.get("title_en") for item in plan_items)
+
+    # Collect all media files first for progress tracking
+    all_files: list[tuple[Path, Path]] = []
+
+    for item in plan_items:
+        source_subdir = item.get("source_subdir", "")
+        target_subdir = item.get("target_subdir", "")
+        source_dir = src / source_subdir if source_subdir else src
+
+        if is_collection:
+            item_title = item.get("title_en") or title_en
+            item_year = item.get("year") or year
+            target_dir = dst / f"{item_title} ({item_year})"
+        else:
+            show_dir = dst / f"{title_en} ({year})"
+            target_dir = show_dir / target_subdir if target_subdir else show_dir
+
+        if not source_dir.is_dir():
+            continue
+
+        for f in sorted(source_dir.rglob("*")):
+            if f.is_file() and is_media_file(f):
+                rel = f.relative_to(source_dir)
+                all_files.append((f, target_dir / rel))
+
+    # Execute hardlinks
+    for i, (src_file, dst_file) in enumerate(all_files):
+        _hardlink_file(src_file, dst_file, result)
+        if progress_cb:
+            progress_cb(i + 1, len(all_files))
+
+    return result
+
+
 def unlink_target(target_dir: Path) -> int:
     """Remove a hardlinked target directory. Returns the number of files removed.
 

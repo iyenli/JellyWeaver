@@ -42,3 +42,33 @@ def diff_with_state(
         if entry is None or entry.status == EntryStatus.PENDING:
             pending.append(item)
     return pending
+
+
+def list_entry_tree(entry_path: str, sample_count: int = 3) -> dict:
+    """Return a compact directory tree of a source entry for LLM consumption.
+
+    Returns {"root_files": [...], "subdirs": [{"name", "sample_files", "file_count"}, ...]}.
+    """
+    root = Path(entry_path)
+    if not root.is_dir():
+        return {"root_files": [], "subdirs": []}
+
+    root_files: list[str] = []
+    subdirs: list[dict] = []
+
+    for child in sorted(root.iterdir()):
+        if child.is_file() and is_media_file(child):
+            if len(root_files) < sample_count:
+                root_files.append(child.name)
+        elif child.is_dir() and not child.name.startswith("."):
+            media_files = sorted(
+                f for f in child.rglob("*")
+                if f.is_file() and is_media_file(f)
+            )
+            subdirs.append({
+                "name": child.name,
+                "sample_files": [f.name for f in media_files[:sample_count]],
+                "file_count": len(media_files),
+            })
+
+    return {"root_files": root_files, "subdirs": subdirs}

@@ -10,14 +10,12 @@
 
 	let smartAddLoading = '';
 
-	function isVisible(entry: EntryItem) {
+	$: visibleEntries = entries.filter((entry) => {
 		if (entry.status === 'linked' && !showCompleted) return false;
 		if (entry.status === 'ignored' && !showIgnored) return false;
 		if (searchText && !entry.name.toLowerCase().includes(searchText.toLowerCase())) return false;
 		return true;
-	}
-
-	$: visibleEntries = entries.filter(isVisible);
+	});
 
 	function statusClass(status: EntryItem['status']) {
 		if (status === 'linked') return 'bg-[var(--green)]';

@@ -6,8 +6,8 @@ import time
 
 from openai import OpenAI, APIError, APITimeoutError
 
-from jelly_weaver.core.models import LLMResult, MediaType
-from .prompts import SYSTEM_PROMPT, build_user_prompt
+from jelly_weaver.core.models import LLMResult, MediaType, LinkPlan, PlanItem, StructureType
+from .prompts import SYSTEM_PROMPT, build_user_prompt, STRUCTURE_SYSTEM_PROMPT, build_structure_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -98,4 +98,58 @@ class LLMClient:
             )
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error("Failed to parse LLM response: %s", e)
+            return None
+
+    def analyze_structure(
+        self,
+        folder_name: str,
+        tree: dict,
+    ) -> LinkPlan | None:
+        """Analyze source directory structure and generate a link plan.
+
+        Returns None if analysis fails after retries.
+        """
+        messages = [
+            {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
+            {"role": "user", "content": build_structure_prompt(folder_name, tree)},
+        ]
+
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.1,
+                )
+                content = resp.choices[0].message.content
+                return self._parse_structure_response(content)
+            except (APIError, APITimeoutError) as e:
+                logger.warning(
+                    "LLM structure analysis attempt %d failed: %s", attempt + 1, e,
+                )
+                if attempt < _MAX_RETRIES:
+                    time.sleep(2 ** attempt)
+            except Exception as e:
+                logger.error("LLM structure analysis unexpected error: %s", e)
+                return None
+        return None
+
+    @staticmethod
+    def _parse_structure_response(content: str) -> LinkPlan | None:
+        """Parse JSON response into LinkPlan."""
+        try:
+            data = json.loads(content)
+            structure_type = StructureType(data["structure_type"])
+            items = []
+            for item in data.get("items", []):
+                items.append(PlanItem(
+                    source_subdir=item.get("source_subdir", ""),
+                    target_subdir=item.get("target_subdir", ""),
+                    title_en=item.get("title_en", ""),
+                    year=int(item.get("year", 0)),
+                ))
+            return LinkPlan(structure_type=structure_type, items=items)
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.error("Failed to parse LLM structure response: %s", e)
             return None

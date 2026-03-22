@@ -1,6 +1,7 @@
 import type {
 	EntryStatus,
 	FsListResponse,
+	LinkPlan,
 	LinkRequest,
 	LlmCheckResult,
 	ParseResult,
@@ -89,6 +90,7 @@ export const api = {
 	listRoots: () => request<{ roots: string[]; home: string }>('/api/fs/roots'),
 	listDir: (path: string) => request<FsListResponse>(`/api/fs/list?path=${encodeURIComponent(path)}`),
 	parseFolder: (name: string, hint?: string) => request<ParseResult>('/api/ops/parse', { method: 'POST', body: JSON.stringify({ name, hint }) }),
+	analyzeStructure: (sourcePath: string, folderName: string) => request<LinkPlan>('/api/ops/analyze', { method: 'POST', body: JSON.stringify({ source_path: sourcePath, folder_name: folderName }) }),
 	startLink: (body: LinkRequest) => request<{ task_id: string; target_path: string }>('/api/ops/link', { method: 'POST', body: JSON.stringify(body) }),
 	unlinkFolder: (targetFolderPath: string) => request<{ ok: boolean; removed_files: number; source_key: string | null }>('/api/ops/unlink', { method: 'POST', body: JSON.stringify({ target_folder_path: targetFolderPath }) }),
 	openStateDir: () => request('/api/settings/open-state-dir', { method: 'POST' }),

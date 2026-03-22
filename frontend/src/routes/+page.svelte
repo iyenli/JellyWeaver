@@ -14,6 +14,9 @@
 		confirmOpen,
 		dirPickerMode,
 		dirPickerOpen,
+		linkPlanError,
+		linkPlanLoading,
+		pendingLinkPlan,
 		pendingParse,
 		pendingSectionId,
 		pendingSourcePath,
@@ -25,7 +28,7 @@
 		sourceSearch,
 		toast
 	} from '$lib/stores/ui';
-	import type { FsItem, ParseResult, Settings, WsMessage } from '$lib/types';
+	import type { FsItem, LinkPlan, ParseResult, Settings, WsMessage } from '$lib/types';
 	import { ws } from '$lib/ws';
 
 	const defaultSettings: Settings = {
@@ -65,8 +68,22 @@
 		pendingSourcePath.set(null);
 		pendingSectionId.set(null);
 		pendingParse.set(null);
+		pendingLinkPlan.set(null);
+		linkPlanLoading.set(false);
+		linkPlanError.set(null);
 		selectedTargetId.set(null);
 		activeSectionId = null;
+	}
+
+	function fireStructureAnalysis(sourcePath: string) {
+		const sourceName = sourcePath.split(/[/\\]/).at(-1) ?? sourcePath;
+		linkPlanLoading.set(true);
+		linkPlanError.set(null);
+		pendingLinkPlan.set(null);
+		api.analyzeStructure(sourcePath, sourceName)
+			.then((plan) => pendingLinkPlan.set(plan))
+			.catch((err) => linkPlanError.set(err instanceof Error ? err.message : 'Structure analysis failed'))
+			.finally(() => linkPlanLoading.set(false));
 	}
 
 	async function loadDir(path: string) {
@@ -122,6 +139,7 @@
 		}
 
 		confirmOpen.set(true);
+		fireStructureAnalysis(sourcePath);
 	}
 
 	async function handleConfirm(parse: ParseResult) {
@@ -129,9 +147,16 @@
 		const sectionId = get(pendingSectionId) ?? get(selectedTargetId);
 		if (!sourcePath || !sectionId) return;
 
+		const plan = get(pendingLinkPlan);
+
 		try {
 			confirmOpen.set(false);
-			const result = await api.startLink({ ...parse, source_path: sourcePath, section_id: sectionId });
+			const result = await api.startLink({
+				...parse,
+				source_path: sourcePath,
+				section_id: sectionId,
+				link_plan: plan?.items ?? null
+			});
 			progress.set({ taskId: result.task_id, current: 0, total: 0 });
 			setToast('info', `Link started: ${result.task_id}`);
 		} catch (error) {
@@ -157,6 +182,7 @@
 			activeSectionId = matchingTarget.id;
 			pendingParse.set(parsed);
 			confirmOpen.set(true);
+			fireStructureAnalysis(sourcePath);
 		} catch {
 			// LLM failed — fall back: pick first target if available
 			const firstTarget = get(targets)[0];
@@ -171,6 +197,7 @@
 			activeSectionId = firstTarget.id;
 			pendingParse.set({ ...emptyParse(sourceName), media_type: hint === 'movie' ? 'movie' : 'tv' });
 			confirmOpen.set(true);
+			fireStructureAnalysis(sourcePath);
 		}
 	}
 
@@ -321,6 +348,9 @@
 				selectedTargetId.set(sectionId);
 				activeSectionId = sectionId;
 				confirmOpen.set(true);
+				if (sourceKey) {
+					fireStructureAnalysis(sourceKey);
+				}
 			}}
 		/>
 	</div>
@@ -343,11 +373,15 @@
 	sourceName={$pendingSourcePath?.split(/[/\\]/).at(-1) ?? ''}
 	value={$pendingParse ?? emptyParse($pendingSourcePath?.split(/[/\\]/).at(-1) ?? '')}
 	targetMediaType={$targets.find((t) => t.id === ($pendingSectionId ?? $selectedTargetId))?.media_type ?? null}
+	linkPlan={$pendingLinkPlan}
+	linkPlanLoading={$linkPlanLoading}
+	linkPlanError={$linkPlanError}
 	onClose={() => {
 		confirmOpen.set(false);
 		clearPendingState();
 	}}
 	onConfirm={handleConfirm}
+	onPlanUpdate={(plan) => pendingLinkPlan.set(plan)}
 />
 
 <SettingsDialog

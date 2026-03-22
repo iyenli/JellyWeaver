@@ -67,12 +67,33 @@ export interface ParseResult {
 export interface LinkRequest extends ParseResult {
 	source_path: string;
 	section_id: string;
+	link_plan?: PlanItem[] | null;
 }
 
 export interface LinkResult {
 	linked: number;
 	skipped: number;
 	errors: string[];
+}
+
+export type StructureType =
+	| 'tv_single_season'
+	| 'tv_multi_season'
+	| 'movie_single'
+	| 'movie_collection'
+	| 'unknown';
+
+export interface PlanItem {
+	source_subdir: string;
+	target_subdir: string;
+	title_en: string;
+	year: number;
+	file_count: number;
+}
+
+export interface LinkPlan {
+	structure_type: StructureType;
+	items: PlanItem[];
 }
 
 export interface WsLinkProgress {
