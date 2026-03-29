@@ -14,7 +14,7 @@ from jelly_weaver.api.deps import get_state, get_llm
 from jelly_weaver.api.ws import manager
 from jelly_weaver.core.models import EntryRecord, EntryStatus
 from jelly_weaver.core.hardlink import link_movie, link_tv_show, link_with_plan, link_with_tree, unlink_target
-from jelly_weaver.core.scanner import list_entry_tree
+from jelly_weaver.core.scanner import list_entry_tree, scan_source
 from jelly_weaver.core.tree import build_tree, collect_sibling_groups, TreeNode
 
 logger = logging.getLogger(__name__)
@@ -356,6 +356,114 @@ async def _run_link(task_id, link_func, src, dst, source_key, st, target_display
             "task_id": task_id,
             "error": str(e),
         })
+
+
+@router.post("/reconcile")
+async def reconcile_state():
+    """Re-scan all sources and update entry states without re-running LLM.
+
+    - LINKED entries whose target dir no longer exists → reset to PENDING.
+    - PENDING/missing entries are matched to target dirs via two methods:
+        1. name_cache lookup (fast, requires prior rename-tree run).
+        2. Merkle key comparison: build_tree on both source and each target dir.
+           If keys match, the files inside are identical → declare linked.
+           This works even when files were linked/copied manually, because the
+           Merkle key depends only on leaf file names, not directory names.
+    - State entries whose source path no longer exists on disk → removed.
+    - LLM name cache is NOT cleared.
+    """
+    st = get_state()
+
+    # Build target directory map and pre-compute their Merkle keys once.
+    # target_names: lower_name -> full_path
+    # target_key_map: merkle_key -> full_path (for direct key comparison)
+    target_names: dict[str, str] = {}
+    target_key_map: dict[str, str] = {}
+
+    for section in st.state.target_sections:
+        if not section.path:
+            continue
+        section_dir = Path(section.path)
+        if not section_dir.is_dir():
+            continue
+        for child in section_dir.iterdir():
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            target_names[child.name.lower()] = str(child)
+            try:
+                t = await asyncio.to_thread(build_tree, child)
+                target_key_map[t.key] = str(child)
+            except Exception:
+                pass
+
+    newly_linked = 0
+    reset_to_pending = 0
+    removed = 0
+    changed = False
+
+    for source_path in list(st.state.sources):
+        scanned = await asyncio.to_thread(scan_source, source_path)
+        scanned_paths = {item["path"] for item in scanned}
+
+        # Remove state entries for paths no longer on disk
+        stale = [
+            k for k in list(st.state.entries)
+            if (k.startswith(source_path + "/") or k.startswith(source_path + "\\"))
+            and k not in scanned_paths
+        ]
+        for k in stale:
+            del st.state.entries[k]
+            removed += 1
+            changed = True
+
+        # Reset LINKED entries whose target dir was deleted
+        for key, rec in list(st.state.entries.items()):
+            if not (key.startswith(source_path + "/") or key.startswith(source_path + "\\")):
+                continue
+            if rec.status == EntryStatus.LINKED and rec.target_path:
+                if not Path(rec.target_path).is_dir():
+                    st.state.entries[key] = EntryRecord(status=EntryStatus.PENDING)
+                    reset_to_pending += 1
+                    changed = True
+
+        # Detect PENDING entries → try cache lookup then Merkle key comparison
+        for item in scanned:
+            key = item["path"]
+            rec = st.state.entries.get(key)
+            if rec and rec.status != EntryStatus.PENDING:
+                continue
+            root_path = Path(key)
+            if not root_path.is_dir():
+                continue
+            try:
+                tree = await asyncio.to_thread(build_tree, root_path)
+            except Exception:
+                continue
+
+            matched: str | None = None
+
+            # Method 1: name_cache → target name lookup
+            cached_name = st.get_cached_name(tree.key)
+            if cached_name:
+                matched = target_names.get(cached_name.lower())
+
+            # Method 2: direct Merkle key comparison against all target dirs
+            if not matched:
+                matched = target_key_map.get(tree.key)
+
+            if matched:
+                st.state.entries[key] = EntryRecord(
+                    status=EntryStatus.LINKED,
+                    target_path=matched,
+                )
+                newly_linked += 1
+                changed = True
+
+    if changed:
+        st.save()
+
+    await manager.broadcast({"type": "state_changed", "scope": "entries"})
+    return {"ok": True, "newly_linked": newly_linked, "reset_to_pending": reset_to_pending, "removed": removed}
 
 
 @router.post("/unlink")

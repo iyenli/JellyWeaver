@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from jelly_weaver.api.deps import get_state
 from jelly_weaver.api.ws import manager
-from jelly_weaver.core.scanner import scan_source, reconcile_entries
+from jelly_weaver.core.scanner import scan_source
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 
@@ -57,17 +57,34 @@ async def remove_source(body: SourceBody):
 def scan(path: str):
     scanned = scan_source(path)
     st = get_state()
-    reconciled = reconcile_entries(scanned, st.state, st.state.target_sections)
+
+    # Build target child name map once (used by name-match fallback)
+    target_names: dict[str, str] = {}
+    for section in st.state.target_sections:
+        if not section.path:
+            continue
+        section_dir = Path(section.path)
+        if not section_dir.is_dir():
+            continue
+        for child in section_dir.iterdir():
+            if child.is_dir() and not child.name.startswith("."):
+                target_names[child.name.lower()] = str(child)
+
     result = []
-    for item in reconciled:
+    for item in scanned:
         key = item["path"]
-        status = item.get("status")
-        target_path = item.get("target_path")
-        if status is None:
-            rec = st.state.entries.get(key)
-            if rec:
-                status = rec.status.value
-                target_path = rec.target_path
+        rec = st.state.entries.get(key)
+        if rec:
+            # Primary: state record is the authoritative source
+            status = rec.status.value
+            target_path = rec.target_path
+        else:
+            # Fallback 1: exact case-insensitive name match (source name == target dir name)
+            folder_name = item["name"].lower()
+            matched_path = target_names.get(folder_name)
+            if matched_path:
+                status = "linked"
+                target_path = matched_path
             else:
                 status = "pending"
                 target_path = None

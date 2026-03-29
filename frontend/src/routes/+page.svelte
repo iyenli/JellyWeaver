@@ -51,6 +51,13 @@
 	let wsConnected = false;
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
+	// Derive the set of target paths that are tracked by a source entry
+	$: linkedTargetPaths = new Set<string>(
+		$sources.flatMap((s) => s.entries)
+			.filter((e) => e.status === 'linked' && e.target_path)
+			.map((e) => e.target_path as string)
+	);
+
 	// Ref to dialog for applying WS updates
 	let renameDialogRef: RenameTreeDialog | undefined;
 
@@ -262,7 +269,20 @@
 	});
 </script>
 
-<AppShell {wsConnected} onRefresh={() => refreshAll()} onOpenSettings={() => settingsOpen.set(true)}>
+<AppShell {wsConnected} onRefresh={() => refreshAll()} onOpenSettings={() => settingsOpen.set(true)} onReconcile={async () => {
+		try {
+			const result = await api.reconcile();
+			await refreshSources();
+			await refreshTargets();
+			const parts = [];
+			if (result.newly_linked) parts.push(`${result.newly_linked} 个新识别为已链接`);
+			if (result.reset_to_pending) parts.push(`${result.reset_to_pending} 个重置为待处理`);
+			if (result.removed) parts.push(`${result.removed} 个已删除条目移除`);
+			setToast('success', parts.length ? parts.join('，') : '状态已更新，无变化');
+		} catch (error) {
+			setToast('error', error instanceof Error ? error.message : '重建状态失败');
+		}
+	}}>
 	<div class="grid gap-6 xl:grid-cols-2 xl:items-start">
 		<SourcePanel
 			sources={$sources}
@@ -297,6 +317,7 @@
 		<TargetPanel
 			targets={$targets}
 			targetContents={$targetContents}
+			{linkedTargetPaths}
 			{activeSectionId}
 			onAddTarget={async () => {
 				try {

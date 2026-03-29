@@ -1,7 +1,14 @@
 <script lang="ts">
 	export let wsConnected = false;
 	export let onRefresh: () => void | Promise<void> = () => {};
+	export let onReconcile: () => void | Promise<void> = () => {};
 	export let onOpenSettings: () => void = () => {};
+
+	let reconciling = false;
+	async function handleReconcile() {
+		reconciling = true;
+		try { await onReconcile(); } finally { reconciling = false; }
+	}
 </script>
 
 <div class="min-h-screen bg-[var(--base)] text-[var(--text)]">
@@ -20,6 +27,17 @@
 
 				<button class="rounded-lg border border-[var(--surface0)] bg-[var(--surface0)] px-4 py-2 text-sm hover:bg-[var(--surface1)]" onclick={onRefresh}>
 					Refresh
+				</button>
+				<button
+					class="rounded-lg border px-4 py-2 text-sm transition-colors disabled:opacity-50
+						{reconciling
+							? 'border-[var(--sky)] bg-[color:color-mix(in_srgb,var(--sky)_12%,var(--surface0))] text-[var(--sky)]'
+							: 'border-[var(--surface0)] bg-[var(--surface0)] hover:border-[var(--sky)] hover:text-[var(--sky)]'}"
+					disabled={reconciling}
+					onclick={handleReconcile}
+					title="重新扫描并更新所有条目状态（不清除 LLM 缓存）"
+				>
+					{reconciling ? '重建中…' : '重建状态'}
 				</button>
 				<button class="rounded-lg border border-[var(--surface0)] bg-[var(--surface0)] px-4 py-2 text-sm hover:bg-[var(--surface1)]" onclick={onOpenSettings}>
 					Settings

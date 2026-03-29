@@ -3,6 +3,7 @@
 
 	export let section: TargetSectionType;
 	export let items: TargetContentItem[] = [];
+	export let linkedTargetPaths: Set<string> = new Set();
 	export let active = false;
 	export let onChange: (patch: Partial<TargetSectionType>) => void | Promise<void> = () => {};
 	export let onRemove: () => void | Promise<void> = () => {};
@@ -83,7 +84,11 @@
 		{#if items.length > 0}
 			<div class="max-h-40 space-y-2 overflow-auto pr-1">
 				{#each items as item (item.path)}
-					<div class="flex items-center gap-2 rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2 text-sm">
+					{@const isTracked = linkedTargetPaths.has(item.path)}
+				<div class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors
+						{isTracked
+							? 'border-[var(--surface0)] bg-[var(--base)] text-[var(--overlay1)]'
+							: 'border-[color:color-mix(in_srgb,var(--sky)_35%,transparent)] bg-[color:color-mix(in_srgb,var(--sky)_6%,var(--base))] text-[var(--sky)]'}">
 						<span class="min-w-0 flex-1 truncate">{item.name}</span>
 						<button
 							class="shrink-0 rounded-md p-1 text-[var(--subtext0)] hover:bg-[var(--surface1)] hover:text-[var(--mauve)]"

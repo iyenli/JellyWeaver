@@ -4,6 +4,7 @@
 
 	export let targets: TargetSectionType[] = [];
 	export let targetContents: Record<string, TargetContentItem[]> = {};
+	export let linkedTargetPaths: Set<string> = new Set();
 	export let activeSectionId: string | null = null;
 	export let onAddTarget: () => void | Promise<void> = () => {};
 	export let onUpdateTarget: (id: string, patch: Partial<TargetSectionType>) => void | Promise<void> = () => {};
@@ -34,6 +35,7 @@
 			<TargetSection
 				{section}
 				items={targetContents[section.id] ?? []}
+				{linkedTargetPaths}
 				active={activeSectionId === section.id}
 				onChange={(patch) => onUpdateTarget(section.id, patch)}
 				onRemove={() => onRemoveTarget(section.id)}
