@@ -1,10 +1,10 @@
 import type {
 	EntryStatus,
 	FsListResponse,
-	LinkPlan,
 	LinkRequest,
 	LlmCheckResult,
-	ParseResult,
+	RenameNode,
+	RenameTreeResult,
 	Settings,
 	TargetContentItem,
 	TargetSection
@@ -89,10 +89,25 @@ export const api = {
 	updateSettings: (body: Partial<Settings>) => request('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
 	listRoots: () => request<{ roots: string[]; home: string }>('/api/fs/roots'),
 	listDir: (path: string) => request<FsListResponse>(`/api/fs/list?path=${encodeURIComponent(path)}`),
-	parseFolder: (name: string, hint?: string) => request<ParseResult>('/api/ops/parse', { method: 'POST', body: JSON.stringify({ name, hint }) }),
-	analyzeStructure: (sourcePath: string, folderName: string) => request<LinkPlan>('/api/ops/analyze', { method: 'POST', body: JSON.stringify({ source_path: sourcePath, folder_name: folderName }) }),
+	parseFolder: (name: string, hint?: string) => request<{ media_type: string; title_en: string; title_zh: string; year: number }>('/api/ops/parse', { method: 'POST', body: JSON.stringify({ name, hint }) }),
+	analyzeStructure: (sourcePath: string, folderName: string) => request<{ structure_type: string; items: unknown[] }>('/api/ops/analyze', { method: 'POST', body: JSON.stringify({ source_path: sourcePath, folder_name: folderName }) }),
+	startRenameTree: (sourcePath: string) =>
+		request<{ task_id: string; tree: RenameNode }>('/api/ops/rename-tree', {
+			method: 'POST',
+			body: JSON.stringify({ source_path: sourcePath })
+		}).then((r): RenameTreeResult => ({ task_id: r.task_id, tree: _initRenameNode(r.tree) })),
 	startLink: (body: LinkRequest) => request<{ task_id: string; target_path: string }>('/api/ops/link', { method: 'POST', body: JSON.stringify(body) }),
 	unlinkFolder: (targetFolderPath: string) => request<{ ok: boolean; removed_files: number; source_key: string | null }>('/api/ops/unlink', { method: 'POST', body: JSON.stringify({ target_folder_path: targetFolderPath }) }),
 	openStateDir: () => request('/api/settings/open-state-dir', { method: 'POST' }),
 	llmCheck: () => request<LlmCheckResult>('/api/settings/llm-check', { method: 'POST' })
 };
+
+/** Ensure every RenameNode has accepted_name initialized to null. */
+function _initRenameNode(node: RenameNode): RenameNode {
+	return {
+		...node,
+		accepted_name: node.accepted_name ?? null,
+		suggested_name: node.suggested_name ?? null,
+		children: node.children.map(_initRenameNode)
+	};
+}

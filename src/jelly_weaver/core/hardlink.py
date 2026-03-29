@@ -182,3 +182,80 @@ def unlink_target(target_dir: Path) -> int:
     count = sum(1 for f in target_dir.rglob("*") if f.is_file())
     shutil.rmtree(target_dir)
     return count
+
+
+def link_with_tree(
+    src: Path,
+    dst: Path,
+    tree: dict,
+    progress_cb=None,
+) -> LinkResult:
+    """Hardlink files using a rename tree (accepted-name recursive mapping).
+
+    The tree dict mirrors the TreeNode.to_dict() output with an added
+    'accepted_name' key at each directory node (the name the user confirmed).
+    Files are never renamed — they are hardlinked under the accepted directory
+    structure.
+
+    Layout produced (example):
+        src/老友记S01.Friends.1994/ → dst/Season 01/
+        src/老友记S02.Friends.1995/ → dst/Season 02/
+
+    For the root node the accepted name is already baked into dst by the caller
+    (dst = target_section_path / root_accepted_name).
+
+    Args:
+        src: Source directory (root entry on disk).
+        dst: Destination directory (already includes root accepted name).
+        tree: Serialised TreeNode dict (with 'accepted_name' fields added).
+        progress_cb: Optional (current, total) callback.
+    """
+    _check_same_device(src, dst)
+    result = LinkResult()
+
+    # Collect all (src_file, dst_file) pairs by walking the tree
+    all_files: list[tuple[Path, Path]] = []
+    _collect_tree_files(src, dst, tree, all_files)
+
+    for i, (src_file, dst_file) in enumerate(all_files):
+        _hardlink_file(src_file, dst_file, result)
+        if progress_cb:
+            progress_cb(i + 1, len(all_files))
+
+    return result
+
+
+def _collect_tree_files(
+    src_dir: Path,
+    dst_dir: Path,
+    node: dict,
+    out: list[tuple[Path, Path]],
+) -> None:
+    """Recursively walk tree nodes and collect (src, dst) file pairs."""
+    children = node.get("children", [])
+
+    if not children:
+        # Leaf directory or file — hardlink all media files directly
+        for f in sorted(src_dir.rglob("*")):
+            if f.is_file() and is_media_file(f):
+                rel = f.relative_to(src_dir)
+                out.append((f, dst_dir / rel))
+        return
+
+    # Separate dir children and any loose files at this level
+    loose_files = [
+        f for f in src_dir.iterdir()
+        if f.is_file() and is_media_file(f)
+    ]
+    for f in sorted(loose_files):
+        out.append((f, dst_dir / f.name))
+
+    for child_node in children:
+        if not child_node.get("is_dir", True):
+            continue
+        original_name = child_node["name"]
+        accepted_name = child_node.get("accepted_name") or original_name
+        child_src = src_dir / original_name
+        child_dst = dst_dir / accepted_name
+        if child_src.is_dir():
+            _collect_tree_files(child_src, child_dst, child_node, out)

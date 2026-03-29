@@ -17,6 +17,7 @@ class SettingsBody(BaseModel):
     api_base: str | None = None
     api_key: str | None = None
     model: str | None = None
+    max_parallel: int | None = None
 
 
 @router.get("")
@@ -34,6 +35,7 @@ async def get_settings():
             if len(api_key) > 10
             else ("***" if api_key else "")
         ),
+        "max_parallel": int(settings.get("max_parallel", 5)),
         "state_file_path": str(STATE_FILE),
         "state_file_exists": STATE_FILE.exists(),
         "llm_settings_file_path": str(LLM_SETTINGS_FILE),
@@ -49,6 +51,9 @@ async def update_settings(body: SettingsBody):
             st.update_llm_setting(field, val)
     if body.api_key is not None:
         st.update_llm_setting("api_key", body.api_key)
+    if body.max_parallel is not None:
+        clamped = max(1, min(20, body.max_parallel))
+        st.update_llm_setting("max_parallel", clamped)
     reset_llm()
     await manager.broadcast({"type": "state_changed", "scope": "settings"})
     return {"ok": True}

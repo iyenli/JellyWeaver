@@ -3,11 +3,11 @@
 	import { api } from '$lib/api';
 
 	export let open = false;
-	export let value: Settings = { api_base: '', model: '', api_key: '', api_key_configured: false, api_key_preview: '' };
+	export let value: Settings = { api_base: '', model: '', api_key: '', api_key_configured: false, api_key_preview: '', max_parallel: 5 };
 	export let onClose: () => void = () => {};
 	export let onSave: (patch: Partial<Settings>) => void | Promise<void> = () => {};
 
-	let draft = { api_base: '', model: '', api_key: '' };
+	let draft = { api_base: '', model: '', api_key: '', max_parallel: 5 };
 	let llmStatus: LlmCheckResult | null = null;
 	let llmChecking = false;
 	let prevOpen = false;
@@ -15,7 +15,7 @@
 	$: if (open !== prevOpen) {
 		prevOpen = open;
 		if (open) {
-			draft = { api_base: value.api_base ?? '', model: value.model ?? '', api_key: '' };
+			draft = { api_base: value.api_base ?? '', model: value.model ?? '', api_key: '', max_parallel: value.max_parallel ?? 5 };
 			llmStatus = null;
 		}
 	}
@@ -27,6 +27,9 @@
 	}
 	$: if (open && !draft.model && value.model) {
 		draft.model = value.model;
+	}
+	$: if (open && draft.max_parallel === 5 && value.max_parallel && value.max_parallel !== 5) {
+		draft.max_parallel = value.max_parallel;
 	}
 
 	async function handleLlmCheck() {
@@ -88,6 +91,11 @@
 				<label class="block space-y-1 text-sm">
 					<span class="text-[var(--subtext0)]">API Key</span>
 					<input class="w-full rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2" type="password" bind:value={draft.api_key} placeholder={value.api_key_configured ? value.api_key_preview || 'Configured' : 'Paste API key'} />
+				</label>
+				<label class="block space-y-1 text-sm">
+					<span class="text-[var(--subtext0)]">Max Parallel LLM Requests</span>
+					<input class="w-full rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2" type="number" min="1" max="20" bind:value={draft.max_parallel} />
+					<span class="text-xs text-[var(--overlay0)]">Controls how many rename requests run concurrently (default 5)</span>
 				</label>
 			</div>
 		</div>

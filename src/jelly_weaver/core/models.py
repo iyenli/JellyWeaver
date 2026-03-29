@@ -87,3 +87,5 @@ class AppState:
         "api_key": "",
         "model": "deepseek-chat",
     })
+    # Merkle-key → LLM-suggested name (persisted cache)
+    name_cache: dict[str, str] = field(default_factory=dict)

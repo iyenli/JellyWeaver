@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 import logging
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -12,8 +13,9 @@ from pydantic import BaseModel
 from jelly_weaver.api.deps import get_state, get_llm
 from jelly_weaver.api.ws import manager
 from jelly_weaver.core.models import EntryRecord, EntryStatus
-from jelly_weaver.core.hardlink import link_movie, link_tv_show, link_with_plan, unlink_target
+from jelly_weaver.core.hardlink import link_movie, link_tv_show, link_with_plan, link_with_tree, unlink_target
 from jelly_weaver.core.scanner import list_entry_tree
+from jelly_weaver.core.tree import build_tree, collect_sibling_groups, TreeNode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ops", tags=["operations"])
@@ -32,6 +34,7 @@ class LinkBody(BaseModel):
     title_zh: str = ""
     year: int
     link_plan: list[dict] | None = None
+    tree_plan: dict | None = None  # RenameNode tree with accepted_name fields
 
 
 class UnlinkBody(BaseModel):
@@ -41,6 +44,10 @@ class UnlinkBody(BaseModel):
 class AnalyzeBody(BaseModel):
     source_path: str
     folder_name: str
+
+
+class RenameTreeBody(BaseModel):
+    source_path: str
 
 
 @router.post("/parse")
@@ -75,7 +82,15 @@ async def start_link(body: LinkBody):
     folder_name = f"{body.title_en} ({body.year})"
     task_id = uuid.uuid4().hex[:8]
 
-    if body.link_plan:
+    if body.tree_plan:
+        # New tree-based linking
+        dst = Path(section.path) / folder_name
+        root_accepted = body.tree_plan.get("accepted_name") or folder_name
+        dst = Path(section.path) / root_accepted
+        from functools import partial
+        link_func = partial(link_with_tree, tree=body.tree_plan)
+        target_display = str(dst)
+    elif body.link_plan:
         from functools import partial
         is_collection = any(item.get("title_en") for item in body.link_plan)
         dst = Path(section.path)
@@ -128,6 +143,168 @@ async def analyze_structure(body: AnalyzeBody):
         "structure_type": result.structure_type.value,
         "items": items,
     }
+
+
+@router.post("/rename-tree")
+async def start_rename_tree(body: RenameTreeBody):
+    """Build a rename tree for source_path and process it bottom-up with LLM.
+
+    Returns the initial tree immediately (with cached names already filled).
+    Remaining nodes are resolved asynchronously via WebSocket messages:
+      rename_node_done: {type, task_id, key, suggested_name, cached}
+      rename_tree_done: {type, task_id, tree, media_type}
+      rename_error:     {type, task_id, error}
+    """
+    client = get_llm()
+    if client is None:
+        raise HTTPException(400, "LLM not configured — set API key in settings")
+
+    src = Path(body.source_path)
+    if not src.is_dir() and not src.is_file():
+        raise HTTPException(400, f"Source not found: {body.source_path}")
+
+    st = get_state()
+    settings = st.load_llm_settings()
+    max_parallel = int(settings.get("max_parallel", 5))
+
+    task_id = uuid.uuid4().hex[:8]
+
+    # Build the tree synchronously (fast — only reads names, not file contents)
+    tree = await asyncio.to_thread(build_tree, src)
+
+    # Resolve cached names immediately so the client sees them in the response
+    _apply_cache(tree, st)
+
+    asyncio.create_task(
+        _run_rename_tree(task_id, tree, client, st, max_parallel)
+    )
+
+    return {"task_id": task_id, "tree": tree.to_dict()}
+
+
+def _apply_cache(node: TreeNode, st) -> None:
+    """Fill suggested_name from cache for all nodes that have a hit."""
+    # We attach a transient attribute; to_dict() must include it.
+    # Since TreeNode is a dataclass we can set it directly.
+    cached = st.get_cached_name(node.key)
+    if cached:
+        node._suggested = cached  # transient, read in to_dict patch below
+    for child in node.children:
+        if child.is_dir:
+            _apply_cache(child, st)
+
+
+async def _run_rename_tree(
+    task_id: str,
+    root: TreeNode,
+    client,
+    st,
+    max_parallel: int,
+) -> None:
+    """Process the rename tree bottom-up, streaming results via WebSocket."""
+    semaphore = asyncio.Semaphore(max_parallel)
+    # suggested_name map: key -> name (built up during processing)
+    suggestions: dict[str, str] = {}
+
+    # Pre-populate from cache
+    def _collect_cached(node: TreeNode) -> None:
+        cached = st.get_cached_name(node.key)
+        if cached:
+            suggestions[node.key] = cached
+        for c in node.children:
+            if c.is_dir:
+                _collect_cached(c)
+    _collect_cached(root)
+
+    sibling_groups = collect_sibling_groups(root)
+
+    for group in sibling_groups:
+        # Split into cached (instant) and uncached (need LLM)
+        cached_in_group = [n for n in group if n.key in suggestions]
+        uncached = [n for n in group if n.key not in suggestions]
+
+        # Broadcast cached hits immediately
+        for node in cached_in_group:
+            await manager.broadcast({
+                "type": "rename_node_done",
+                "task_id": task_id,
+                "key": node.key,
+                "suggested_name": suggestions[node.key],
+                "cached": True,
+            })
+
+        if not uncached:
+            continue
+
+        # Build sibling context for LLM
+        parent_context = _parent_context(group[0], root, suggestions)
+        siblings_payload = []
+        for node in uncached:
+            children_info = []
+            for c in node.children:
+                suggested = suggestions.get(c.key, c.name)
+                children_info.append(f"{suggested}/ ({c.file_count} files)")
+            siblings_payload.append({
+                "original_name": node.name,
+                "children_info": children_info[:8],
+                "sample_files": node.sample_files[:5],
+            })
+
+        async with semaphore:
+            names = await asyncio.to_thread(
+                client.rename_batch, siblings_payload, parent_context, group[0].depth
+            )
+
+        for node, suggested in zip(uncached, names):
+            final_name = suggested or node.name
+            suggestions[node.key] = final_name
+            st.set_cached_name(node.key, final_name)
+            await manager.broadcast({
+                "type": "rename_node_done",
+                "task_id": task_id,
+                "key": node.key,
+                "suggested_name": final_name,
+                "cached": False,
+            })
+
+    # Infer media_type from root suggestion
+    root_name = suggestions.get(root.key, root.name)
+    has_season = any(
+        suggestions.get(c.key, c.name).startswith("Season ")
+        for c in root.children if c.is_dir
+    )
+    media_type = "tv" if has_season else "movie"
+
+    # Build final tree dict with suggested names
+    final_tree = _tree_with_suggestions(root, suggestions)
+
+    await manager.broadcast({
+        "type": "rename_tree_done",
+        "task_id": task_id,
+        "tree": final_tree,
+        "media_type": media_type,
+    })
+
+
+def _parent_context(node: TreeNode, root: TreeNode, suggestions: dict[str, str]) -> str:
+    """Build a human-readable parent context string for the LLM prompt."""
+    if node.depth == 0:
+        return "根目录"
+    # For depth > 0 nodes, parent is the node at depth-1 — find it via root name
+    root_name = suggestions.get(root.key, root.name)
+    if node.depth == 1:
+        return f"根目录 (原名: {root.name}, 建议名: {root_name})"
+    return f"{root_name} 的子目录 (depth {node.depth - 1})"
+
+
+def _tree_with_suggestions(node: TreeNode, suggestions: dict[str, str]) -> dict:
+    """Serialise tree dict enriched with suggested_name fields."""
+    d = node.to_dict()
+    d["suggested_name"] = suggestions.get(node.key)
+    d["children"] = [
+        _tree_with_suggestions(c, suggestions) for c in node.children
+    ]
+    return d
 
 
 async def _run_link(task_id, link_func, src, dst, source_key, st, target_display=None):

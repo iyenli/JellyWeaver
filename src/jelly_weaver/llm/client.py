@@ -7,7 +7,11 @@ import time
 from openai import OpenAI, APIError, APITimeoutError
 
 from jelly_weaver.core.models import LLMResult, MediaType, LinkPlan, PlanItem, StructureType
-from .prompts import SYSTEM_PROMPT, build_user_prompt, STRUCTURE_SYSTEM_PROMPT, build_structure_prompt
+from .prompts import (
+    SYSTEM_PROMPT, build_user_prompt,
+    STRUCTURE_SYSTEM_PROMPT, build_structure_prompt,
+    RENAME_SYSTEM_PROMPT, build_rename_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -152,4 +156,74 @@ class LLMClient:
             return LinkPlan(structure_type=structure_type, items=items)
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error("Failed to parse LLM structure response: %s", e)
+            return None
+
+    def rename_batch(
+        self,
+        siblings: list[dict],
+        parent_context: str,
+        depth: int = 0,
+    ) -> list[str | None]:
+        """Batch-rename a group of sibling directories.
+
+        Args:
+            siblings: List of dicts with original_name, children_info, sample_files.
+            parent_context: Human-readable description of parent dir.
+            depth: Directory depth (0 = root entry).
+
+        Returns:
+            List of suggested names aligned with input; None entries on failure.
+        """
+        if not siblings:
+            return []
+
+        messages = [
+            {"role": "system", "content": RENAME_SYSTEM_PROMPT},
+            {"role": "user", "content": build_rename_prompt(siblings, parent_context)},
+        ]
+
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    temperature=0.1,
+                )
+                content = resp.choices[0].message.content or ""
+                names = self._parse_rename_response(content, len(siblings))
+                if names is not None:
+                    return names
+            except (APIError, APITimeoutError) as e:
+                logger.warning("rename_batch attempt %d failed: %s", attempt + 1, e)
+                if attempt < _MAX_RETRIES:
+                    time.sleep(2 ** attempt)
+            except Exception as e:
+                logger.error("rename_batch unexpected error: %s", e)
+                return [None] * len(siblings)
+
+        return [None] * len(siblings)
+
+    @staticmethod
+    def _parse_rename_response(content: str, expected: int) -> list[str | None] | None:
+        """Parse JSON array rename response.
+
+        Returns list of names (aligned by index) or None if unparseable.
+        """
+        try:
+            # Strip markdown code fences if present
+            text = content.strip()
+            if text.startswith("```"):
+                text = "\n".join(text.split("\n")[1:])
+                text = text.rstrip("`").strip()
+            data = json.loads(text)
+            if not isinstance(data, list):
+                return None
+            result: list[str | None] = [None] * expected
+            for item in data:
+                idx = int(item["index"])
+                if 0 <= idx < expected:
+                    result[idx] = str(item["name"])
+            return result
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            logger.error("Failed to parse rename response: %s | content: %s", e, content[:200])
             return None

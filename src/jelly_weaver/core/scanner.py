@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from .models import EntryRecord, EntryStatus, AppState
+from .models import EntryRecord, EntryStatus, AppState, TargetSection
 from .media_parser import is_media_file
+from .tree import build_tree, name_hash
 
 
 def scan_source(path: str) -> list[dict]:
@@ -42,6 +43,60 @@ def diff_with_state(
         if entry is None or entry.status == EntryStatus.PENDING:
             pending.append(item)
     return pending
+
+
+def reconcile_entries(
+    entries: list[dict],
+    state: AppState,
+    target_sections: list[TargetSection],
+) -> list[dict]:
+    """Auto-detect manually-linked entries by matching cached names to target dirs.
+
+    For each PENDING entry whose root key is in name_cache, check if the
+    cached name exists as a child directory under any target section.  If
+    found, update the entry dict status to 'linked'.  This lets the frontend
+    show the correct status without the user having to drag-and-drop again.
+    """
+    # Build a set of lowercase names present in any target section
+    target_names: dict[str, str] = {}  # lowercase name -> full path
+    for section in target_sections:
+        if not section.path:
+            continue
+        section_dir = Path(section.path)
+        if not section_dir.is_dir():
+            continue
+        for child in section_dir.iterdir():
+            if child.is_dir():
+                target_names[child.name.lower()] = str(child)
+
+    result = []
+    for item in entries:
+        entry_path = item["path"]
+        existing = state.entries.get(entry_path)
+        if existing and existing.status != EntryStatus.PENDING:
+            result.append(item)
+            continue
+
+        # Compute root key for this entry
+        root_path = Path(entry_path)
+        if root_path.is_dir():
+            tree = build_tree(root_path, depth=0)
+            root_key = tree.key
+        else:
+            root_key = name_hash(root_path.name)
+
+        cached_name = state.name_cache.get(root_key)
+        if cached_name:
+            matched_path = target_names.get(cached_name.lower())
+            if matched_path:
+                item = dict(item)
+                item["status"] = "linked"
+                item["target_path"] = matched_path
+                result.append(item)
+                continue
+
+        result.append(item)
+    return result
 
 
 def list_entry_tree(entry_path: str, sample_count: int = 3) -> dict:

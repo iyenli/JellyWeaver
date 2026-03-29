@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import AppShell from '../components/AppShell.svelte';
-	import ConfirmDialog from '../components/ConfirmDialog.svelte';
+	import RenameTreeDialog from '../components/RenameTreeDialog.svelte';
 	import DirPicker from '../components/DirPicker.svelte';
 	import ProgressBar from '../components/ProgressBar.svelte';
 	import SettingsDialog from '../components/SettingsDialog.svelte';
@@ -11,16 +11,17 @@
 	import { api } from '$lib/api';
 	import { loading, refreshAll, refreshSettings, refreshSources, refreshTargets, settings, sources, targetContents, targets } from '$lib/stores/state';
 	import {
-		confirmOpen,
 		dirPickerMode,
 		dirPickerOpen,
-		linkPlanError,
-		linkPlanLoading,
-		pendingLinkPlan,
-		pendingParse,
 		pendingSectionId,
 		pendingSourcePath,
 		progress,
+		renameDialogOpen,
+		renameTree,
+		renameTreeError,
+		renameTreeLoading,
+		renameTreeMediaType,
+		renameTreeTaskId,
 		selectedTargetId,
 		settingsOpen,
 		showCompleted,
@@ -28,7 +29,7 @@
 		sourceSearch,
 		toast
 	} from '$lib/stores/ui';
-	import type { FsItem, LinkPlan, ParseResult, Settings, WsMessage } from '$lib/types';
+	import type { FsItem, MediaType, RenameNode, Settings, WsMessage } from '$lib/types';
 	import { ws } from '$lib/ws';
 
 	const defaultSettings: Settings = {
@@ -37,18 +38,10 @@
 		api_key: '',
 		api_key_configured: false,
 		api_key_preview: '',
+		max_parallel: 5,
 		state_file_path: '',
 		state_file_exists: false
 	};
-
-	function emptyParse(title = ''): ParseResult {
-		return {
-			media_type: 'movie',
-			title_en: title,
-			title_zh: '',
-			year: new Date().getFullYear()
-		};
-	}
 
 	let fsItems: FsItem[] = [];
 	let fsRoots: string[] = [];
@@ -57,6 +50,12 @@
 	let activeSectionId: string | null = null;
 	let wsConnected = false;
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Ref to dialog for applying WS updates
+	let renameDialogRef: RenameTreeDialog | undefined;
+
+	// Resolved node count for progress display
+	let resolvedNodeCount = 0;
 
 	function setToast(type: 'info' | 'error' | 'success', message: string) {
 		toast.set({ type, message });
@@ -67,23 +66,46 @@
 	function clearPendingState() {
 		pendingSourcePath.set(null);
 		pendingSectionId.set(null);
-		pendingParse.set(null);
-		pendingLinkPlan.set(null);
-		linkPlanLoading.set(false);
-		linkPlanError.set(null);
+		renameTree.set(null);
+		renameTreeTaskId.set(null);
+		renameTreeLoading.set(false);
+		renameTreeError.set(null);
+		renameTreeMediaType.set(null);
 		selectedTargetId.set(null);
 		activeSectionId = null;
+		resolvedNodeCount = 0;
 	}
 
-	function fireStructureAnalysis(sourcePath: string) {
-		const sourceName = sourcePath.split(/[/\\]/).at(-1) ?? sourcePath;
-		linkPlanLoading.set(true);
-		linkPlanError.set(null);
-		pendingLinkPlan.set(null);
-		api.analyzeStructure(sourcePath, sourceName)
-			.then((plan) => pendingLinkPlan.set(plan))
-			.catch((err) => linkPlanError.set(err instanceof Error ? err.message : 'Structure analysis failed'))
-			.finally(() => linkPlanLoading.set(false));
+	function startRenameTree(sourcePath: string) {
+		renameTreeLoading.set(true);
+		renameTreeError.set(null);
+		renameTree.set(null);
+		renameTreeMediaType.set(null);
+		resolvedNodeCount = 0;
+
+		api.startRenameTree(sourcePath)
+			.then((result) => {
+				renameTreeTaskId.set(result.task_id);
+				renameTree.set(result.tree);
+				// Count nodes already resolved from cache
+				resolvedNodeCount = countResolved(result.tree);
+			})
+			.catch((err) => {
+				renameTreeError.set(err instanceof Error ? err.message : 'Tree analysis failed');
+				renameTreeLoading.set(false);
+			});
+	}
+
+	function countResolved(node: RenameNode): number {
+		let count = node.suggested_name !== null ? 1 : 0;
+		for (const c of node.children) count += countResolved(c);
+		return count;
+	}
+
+	function countDirs(node: RenameNode): number {
+		let count = node.is_dir ? 1 : 0;
+		for (const c of node.children) count += countDirs(c);
+		return count;
 	}
 
 	async function loadDir(path: string) {
@@ -127,35 +149,27 @@
 		pendingSectionId.set(sectionId);
 		selectedTargetId.set(sectionId);
 		activeSectionId = sectionId;
-		const sourceName = sourcePath.split(/[/\\]/).at(-1) ?? sourcePath;
-		const target = get(targets).find((item) => item.id === sectionId);
-		const hint = target?.media_type === 'movies' ? 'movie' : 'tv';
-
-		try {
-			const parsed = await api.parseFolder(sourceName, hint);
-			pendingParse.set(parsed);
-		} catch {
-			pendingParse.set({ ...emptyParse(sourceName), media_type: hint === 'movie' ? 'movie' : 'tv' });
-		}
-
-		confirmOpen.set(true);
-		fireStructureAnalysis(sourcePath);
+		renameDialogOpen.set(true);
+		startRenameTree(sourcePath);
 	}
 
-	async function handleConfirm(parse: ParseResult) {
+	async function handleConfirm(tree: RenameNode, mediaType: MediaType) {
 		const sourcePath = get(pendingSourcePath);
 		const sectionId = get(pendingSectionId) ?? get(selectedTargetId);
 		if (!sourcePath || !sectionId) return;
 
-		const plan = get(pendingLinkPlan);
+		const rootAccepted = tree.accepted_name ?? tree.suggested_name ?? tree.name;
 
 		try {
-			confirmOpen.set(false);
+			renameDialogOpen.set(false);
 			const result = await api.startLink({
-				...parse,
 				source_path: sourcePath,
 				section_id: sectionId,
-				link_plan: plan?.items ?? null
+				media_type: mediaType,
+				title_en: rootAccepted,
+				title_zh: '',
+				year: 0,
+				tree_plan: tree
 			});
 			progress.set({ taskId: result.task_id, current: 0, total: 0 });
 			setToast('info', `Link started: ${result.task_id}`);
@@ -166,39 +180,19 @@
 	}
 
 	async function handleSmartAdd(sourcePath: string) {
-		const sourceName = sourcePath.split(/[/\\]/).at(-1) ?? sourcePath;
-		try {
-			const parsed = await api.parseFolder(sourceName);
-			// Auto-select matching target library
-			const targetMediaType = parsed.media_type === 'movie' ? 'movies' : 'tv';
-			const matchingTarget = get(targets).find((t) => t.media_type === targetMediaType);
-			if (!matchingTarget) {
-				setToast('error', `No library configured for type "${parsed.media_type}" — add one first`);
-				return;
-			}
-			pendingSourcePath.set(sourcePath);
-			pendingSectionId.set(matchingTarget.id);
-			selectedTargetId.set(matchingTarget.id);
-			activeSectionId = matchingTarget.id;
-			pendingParse.set(parsed);
-			confirmOpen.set(true);
-			fireStructureAnalysis(sourcePath);
-		} catch {
-			// LLM failed — fall back: pick first target if available
-			const firstTarget = get(targets)[0];
-			if (!firstTarget) {
-				setToast('error', 'No libraries configured — add one first');
-				return;
-			}
-			const hint = firstTarget.media_type === 'movies' ? 'movie' : 'tv';
-			pendingSourcePath.set(sourcePath);
-			pendingSectionId.set(firstTarget.id);
-			selectedTargetId.set(firstTarget.id);
-			activeSectionId = firstTarget.id;
-			pendingParse.set({ ...emptyParse(sourceName), media_type: hint === 'movie' ? 'movie' : 'tv' });
-			confirmOpen.set(true);
-			fireStructureAnalysis(sourcePath);
+		// Pick target library: use first available
+		const allTargets = get(targets);
+		if (!allTargets.length) {
+			setToast('error', 'No libraries configured — add one first');
+			return;
 		}
+		const firstTarget = allTargets[0];
+		pendingSourcePath.set(sourcePath);
+		pendingSectionId.set(firstTarget.id);
+		selectedTargetId.set(firstTarget.id);
+		activeSectionId = firstTarget.id;
+		renameDialogOpen.set(true);
+		startRenameTree(sourcePath);
 	}
 
 	async function handleWsMessage(message: WsMessage) {
@@ -206,7 +200,6 @@
 			progress.set({ taskId: message.task_id, current: message.current, total: message.total });
 			return;
 		}
-
 		if (message.type === 'link_done') {
 			progress.set(null);
 			await refreshSources();
@@ -215,17 +208,38 @@
 			clearPendingState();
 			return;
 		}
-
 		if (message.type === 'link_error') {
 			progress.set(null);
 			setToast('error', message.error);
 			clearPendingState();
 			return;
 		}
-
-		if (message.scope === 'sources' || message.scope === 'entries') await refreshSources();
-		if (message.scope === 'targets') await refreshTargets();
-		if (message.scope === 'settings') await refreshSettings();
+		if (message.type === 'rename_node_done') {
+			if (message.task_id === get(renameTreeTaskId)) {
+				resolvedNodeCount += 1;
+				renameDialogRef?.applyNodeUpdate(message.key, message.suggested_name);
+			}
+			return;
+		}
+		if (message.type === 'rename_tree_done') {
+			if (message.task_id === get(renameTreeTaskId)) {
+				renameTreeLoading.set(false);
+				renameDialogRef?.applyTreeDone(message.tree, message.media_type);
+			}
+			return;
+		}
+		if (message.type === 'rename_error') {
+			if (message.task_id === get(renameTreeTaskId)) {
+				renameTreeLoading.set(false);
+				renameTreeError.set(message.error);
+			}
+			return;
+		}
+		if (message.type === 'state_changed') {
+			if (message.scope === 'sources' || message.scope === 'entries') await refreshSources();
+			if (message.scope === 'targets') await refreshTargets();
+			if (message.scope === 'settings') await refreshSettings();
+		}
 	}
 
 	onMount(() => {
@@ -320,8 +334,7 @@
 					setToast('error', error instanceof Error ? error.message : 'Unlink failed');
 				}
 			}}
-			onReparse={async (targetFolderPath, folderName, sectionId) => {
-				// First unlink the existing folder
+			onReparse={async (targetFolderPath, _folderName, sectionId) => {
 				let sourceKey: string | null = null;
 				try {
 					const result = await api.unlinkFolder(targetFolderPath);
@@ -332,25 +345,13 @@
 					setToast('error', error instanceof Error ? error.message : 'Unlink failed');
 					return;
 				}
-				// Re-parse the folder name with AI
-				const target = $targets.find((t) => t.id === sectionId);
-				const hint = target?.media_type === 'movies' ? 'movie' : 'tv';
-				try {
-					const parsed = await api.parseFolder(folderName, hint);
-					pendingParse.set(parsed);
-				} catch {
-					pendingParse.set({ ...emptyParse(folderName), media_type: hint === 'movie' ? 'movie' : 'tv' });
-				}
-				if (sourceKey) {
-					pendingSourcePath.set(sourceKey);
-				}
+				const sourcePath = sourceKey ?? targetFolderPath;
+				pendingSourcePath.set(sourcePath);
 				pendingSectionId.set(sectionId);
 				selectedTargetId.set(sectionId);
 				activeSectionId = sectionId;
-				confirmOpen.set(true);
-				if (sourceKey) {
-					fireStructureAnalysis(sourceKey);
-				}
+				renameDialogOpen.set(true);
+				startRenameTree(sourcePath);
 			}}
 		/>
 	</div>
@@ -368,20 +369,22 @@
 	onSelect={handleSelectDir}
 />
 
-<ConfirmDialog
-	open={$confirmOpen}
+<RenameTreeDialog
+	bind:this={renameDialogRef}
+	open={$renameDialogOpen}
 	sourceName={$pendingSourcePath?.split(/[/\\]/).at(-1) ?? ''}
-	value={$pendingParse ?? emptyParse($pendingSourcePath?.split(/[/\\]/).at(-1) ?? '')}
-	targetMediaType={$targets.find((t) => t.id === ($pendingSectionId ?? $selectedTargetId))?.media_type ?? null}
-	linkPlan={$pendingLinkPlan}
-	linkPlanLoading={$linkPlanLoading}
-	linkPlanError={$linkPlanError}
+	sectionName={$targets.find((t) => t.id === ($pendingSectionId ?? $selectedTargetId))?.name ?? ''}
+	tree={$renameTree}
+	loading={$renameTreeLoading}
+	error={$renameTreeError}
+	mediaType={$renameTreeMediaType}
+	resolvedCount={resolvedNodeCount}
+	totalDirCount={$renameTree ? countDirs($renameTree) : 0}
 	onClose={() => {
-		confirmOpen.set(false);
+		renameDialogOpen.set(false);
 		clearPendingState();
 	}}
 	onConfirm={handleConfirm}
-	onPlanUpdate={(plan) => pendingLinkPlan.set(plan)}
 />
 
 <SettingsDialog

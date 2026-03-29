@@ -135,6 +135,13 @@ class StateManager:
         self.state.settings[key] = value
         self.save()
 
+    def get_cached_name(self, key: str) -> str | None:
+        return self.state.name_cache.get(key)
+
+    def set_cached_name(self, key: str, name: str) -> None:
+        self.state.name_cache[key] = name
+        self.save()
+
     # --- Serialization ---
 
     @staticmethod
@@ -159,6 +166,7 @@ class StateManager:
             "sources": state.sources,
             "target_sections": sections,
             "entries": entries,
+            "name_cache": state.name_cache,
         }
 
     @staticmethod
@@ -198,4 +206,5 @@ class StateManager:
             target_sections=sections,
             entries=entries,
             settings=raw.get("settings", {}),
+            name_cache=raw.get("name_cache", {}),
         )
