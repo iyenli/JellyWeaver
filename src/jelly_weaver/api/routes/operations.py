@@ -50,6 +50,14 @@ class RenameTreeBody(BaseModel):
     source_path: str
 
 
+@router.delete("/name-cache")
+async def clear_name_cache():
+    """Clear the LLM rename name cache. Next drag will re-invoke LLM for all entries."""
+    st = get_state()
+    count = st.clear_name_cache()
+    return {"ok": True, "cleared": count}
+
+
 @router.post("/parse")
 async def parse_folder(body: ParseBody):
     client = get_llm()

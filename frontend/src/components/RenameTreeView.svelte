@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import type { RenameNode } from '$lib/types';
 
 	export let node: RenameNode;
@@ -10,6 +11,9 @@
 	export let regenLoadingKeys: Set<string> = new Set();
 
 	let collapsed = !isRoot && node.depth > 0;
+	let isEditing = false;
+	let editValue = '';
+	let inputEl: HTMLInputElement | null = null;
 
 	$: dirChildren = node.children.filter((c) => c.is_dir);
 	$: effective = node.accepted_name ?? node.suggested_name ?? node.name;
@@ -17,11 +21,33 @@
 	$: isAccepted = node.accepted_name !== null && node.accepted_name !== node.name;
 	$: isEdited = node.accepted_name !== null && node.accepted_name !== (node.suggested_name ?? node.name);
 	$: isLoading = regenLoadingKeys.has(node.key);
+	$: canEdit = !!(node.suggested_name || node.accepted_name);
 
 	function handleAccept() { onAccept(node.key, node.suggested_name ?? node.name); }
 	function handleKeep() { onKeep(node.key); }
 	function handleRegen() { onRegenerate(node.key); }
-	function handleEditInput(e: Event) { onEdit(node.key, (e.target as HTMLInputElement).value); }
+
+	async function startEdit() {
+		if (!canEdit) return;
+		editValue = effective;
+		isEditing = true;
+		await tick();
+		inputEl?.focus();
+		inputEl?.select();
+	}
+
+	function commitEdit() {
+		isEditing = false;
+		const trimmed = editValue.trim();
+		if (trimmed && trimmed !== effective) {
+			onEdit(node.key, trimmed);
+		}
+	}
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+		if (e.key === 'Escape') { isEditing = false; }
+	}
 
 	function acceptSubtree(n: RenameNode) {
 		if (n.is_dir) { onAccept(n.key, n.suggested_name ?? n.name); n.children.forEach((c) => c.is_dir && acceptSubtree(c)); }
@@ -50,18 +76,26 @@
 
 		{#if isLoading}
 			<span class="spinner-label">⏳ 生成中…</span>
-		{:else}
+		{:else if isEditing}
 			<input
-				class="name-input"
+				bind:this={inputEl}
+				class="name-input editing"
+				bind:value={editValue}
+				on:blur={commitEdit}
+				on:keydown={handleKeydown}
+			/>
+		{:else}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<span
+				class="name-label"
 				class:accepted={isAccepted}
 				class:kept={isKept}
 				class:edited={isEdited}
 				class:pending={!node.suggested_name && !node.accepted_name}
-				value={effective}
-				placeholder={node.suggested_name ? '' : '等待 LLM…'}
-				disabled={!node.suggested_name && !node.accepted_name}
-				on:input={handleEditInput}
-			/>
+				class:editable={canEdit}
+				title={canEdit ? '双击修改' : '等待 LLM…'}
+				on:dblclick={startEdit}
+			>{effective}</span>
 		{/if}
 
 		<span class="file-count">{node.file_count}f</span>
@@ -137,23 +171,33 @@
 
 	.arrow { color: var(--overlay1); flex-shrink: 0; font-size: 0.9rem; }
 
+	.name-label {
+		flex: 1; min-width: 130px;
+		padding: 3px 7px;
+		font-size: 0.84rem;
+		font-family: inherit;
+		border-radius: 4px;
+		border: 1px solid transparent;
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		color: var(--text);
+	}
+	.name-label.editable:hover { border-color: var(--surface2); cursor: text; }
+	.name-label.accepted { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+	.name-label.kept { color: var(--overlay1); }
+	.name-label.edited { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 40%, transparent); }
+	.name-label.pending { color: var(--overlay0); font-style: italic; }
+
 	.name-input {
 		flex: 1; min-width: 130px;
 		background: var(--base);
-		border: 1px solid var(--surface2);
+		border: 1px solid var(--blue);
 		border-radius: 4px;
 		color: var(--text);
 		padding: 3px 7px;
 		font-size: 0.84rem;
 		font-family: inherit;
-		transition: border-color 0.15s;
 	}
-	.name-input:focus { outline: none; border-color: var(--blue); }
-	.name-input.accepted { border-color: var(--green); color: var(--green); }
-	.name-input.kept { border-color: var(--overlay1); color: var(--overlay1); }
-	.name-input.edited { border-color: var(--yellow); }
-	.name-input.pending { border-color: var(--surface2); color: var(--overlay0); font-style: italic; }
-	.name-input:disabled { opacity: 0.4; cursor: not-allowed; }
+	.name-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 25%, transparent); }
 
 	.spinner-label { flex: 1; color: var(--overlay1); font-style: italic; font-size: 0.78rem; }
 

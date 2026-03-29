@@ -7,27 +7,13 @@ from pydantic import BaseModel
 
 from jelly_weaver.api.deps import get_state
 from jelly_weaver.api.ws import manager
-from jelly_weaver.core.scanner import scan_source
+from jelly_weaver.core.scanner import scan_source, reconcile_entries
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 
 
 class SourceBody(BaseModel):
     path: str
-
-
-def _gather_target_child_names() -> dict[str, str]:
-    """Return a mapping of lowercase child directory name -> full path
-    across all configured target sections with valid paths."""
-    st = get_state()
-    names: dict[str, str] = {}
-    for section in st.state.target_sections:
-        target_dir = Path(section.path) if section.path else None
-        if target_dir and target_dir.is_dir():
-            for child in target_dir.iterdir():
-                if child.is_dir() and not child.name.startswith("."):
-                    names[child.name.lower()] = str(child)
-    return names
 
 
 @router.get("")
@@ -71,21 +57,17 @@ async def remove_source(body: SourceBody):
 def scan(path: str):
     scanned = scan_source(path)
     st = get_state()
-    target_children = _gather_target_child_names()
+    reconciled = reconcile_entries(scanned, st.state, st.state.target_sections)
     result = []
-    for item in scanned:
+    for item in reconciled:
         key = item["path"]
-        rec = st.state.entries.get(key)
-        if rec:
-            status = rec.status.value
-            target_path = rec.target_path
-        else:
-            # Check if the source folder name matches any existing target child
-            folder_name = item["name"].lower()
-            matched_path = target_children.get(folder_name)
-            if matched_path:
-                status = "linked"
-                target_path = matched_path
+        status = item.get("status")
+        target_path = item.get("target_path")
+        if status is None:
+            rec = st.state.entries.get(key)
+            if rec:
+                status = rec.status.value
+                target_path = rec.target_path
             else:
                 status = "pending"
                 target_path = None

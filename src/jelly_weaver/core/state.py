@@ -142,6 +142,12 @@ class StateManager:
         self.state.name_cache[key] = name
         self.save()
 
+    def clear_name_cache(self) -> int:
+        count = len(self.state.name_cache)
+        self.state.name_cache.clear()
+        self.save()
+        return count
+
     # --- Serialization ---
 
     @staticmethod

@@ -99,7 +99,8 @@ export const api = {
 	startLink: (body: LinkRequest) => request<{ task_id: string; target_path: string }>('/api/ops/link', { method: 'POST', body: JSON.stringify(body) }),
 	unlinkFolder: (targetFolderPath: string) => request<{ ok: boolean; removed_files: number; source_key: string | null }>('/api/ops/unlink', { method: 'POST', body: JSON.stringify({ target_folder_path: targetFolderPath }) }),
 	openStateDir: () => request('/api/settings/open-state-dir', { method: 'POST' }),
-	llmCheck: () => request<LlmCheckResult>('/api/settings/llm-check', { method: 'POST' })
+	llmCheck: () => request<LlmCheckResult>('/api/settings/llm-check', { method: 'POST' }),
+	clearNameCache: () => request<{ ok: boolean; cleared: number }>('/api/ops/name-cache', { method: 'DELETE' })
 };
 
 /** Ensure every RenameNode has accepted_name initialized to null. */

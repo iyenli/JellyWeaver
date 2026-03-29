@@ -51,6 +51,18 @@
 			// silently fail
 		}
 	}
+
+	let cacheClearStatus: 'idle' | 'clearing' | 'done' = 'idle';
+	async function handleClearCache() {
+		cacheClearStatus = 'clearing';
+		try {
+			const result = await api.clearNameCache();
+			cacheClearStatus = 'done';
+			setTimeout(() => { cacheClearStatus = 'idle'; }, 2000);
+		} catch {
+			cacheClearStatus = 'idle';
+		}
+	}
 </script>
 
 {#if open}
@@ -97,6 +109,27 @@
 					<input class="w-full rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2" type="number" min="1" max="20" bind:value={draft.max_parallel} />
 					<span class="text-xs text-[var(--overlay0)]">Controls how many rename requests run concurrently (default 5)</span>
 				</label>
+			</div>
+		</div>
+
+		<!-- Maintenance Section -->
+		<div class="mb-5">
+			<h4 class="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--subtext0)]">Maintenance</h4>
+			<div class="flex items-center justify-between rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2">
+				<div>
+					<div class="text-sm text-[var(--text)]">名称缓存</div>
+					<div class="text-xs text-[var(--overlay0)]">清除后，下次拖拽将重新调用 LLM 生成目录名建议</div>
+				</div>
+				<button
+					class="rounded-md border px-3 py-1.5 text-xs transition-colors disabled:opacity-50
+						{cacheClearStatus === 'done'
+							? 'border-[var(--green)] text-[var(--green)]'
+							: 'border-[var(--red)] text-[var(--red)] hover:bg-[color:color-mix(in_srgb,var(--red)_12%,transparent)]'}"
+					disabled={cacheClearStatus === 'clearing'}
+					onclick={handleClearCache}
+				>
+					{cacheClearStatus === 'clearing' ? '清除中…' : cacheClearStatus === 'done' ? '✓ 已清除' : '清除缓存'}
+				</button>
 			</div>
 		</div>
 
