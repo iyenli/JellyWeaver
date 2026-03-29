@@ -36,23 +36,40 @@ class LLMClient:
         self._api_key = api_key
         self._model = model
 
+    def _create(self, **kwargs):
+        """Call chat.completions.create with automatic fallbacks for picky models.
+
+        Some models (o1, o3, etc.) reject 'temperature' or 'response_format'.
+        On a 400 that mentions the unsupported parameter, retry once without it.
+        """
+        try:
+            return self._client.chat.completions.create(**kwargs)
+        except APIError as e:
+            err = str(e)
+            retried = False
+            if "temperature" in err:
+                kwargs.pop("temperature", None)
+                retried = True
+            if "response_format" in err:
+                kwargs.pop("response_format", None)
+                retried = True
+            if retried:
+                return self._client.chat.completions.create(**kwargs)
+            raise
+
     def parse_folder_name(
         self,
         name: str,
         hint: str | None = None,
     ) -> LLMResult | None:
-        """Parse a raw folder name into structured media info.
-
-        Returns None if parsing fails after retries.
-        """
+        """Parse a raw folder name into structured media info."""
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": build_user_prompt(name, hint)},
         ]
-
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                resp = self._client.chat.completions.create(
+                resp = self._create(
                     model=self._model,
                     messages=messages,
                     response_format={"type": "json_object"},
@@ -61,9 +78,7 @@ class LLMClient:
                 content = resp.choices[0].message.content
                 return self._parse_response(content)
             except (APIError, APITimeoutError) as e:
-                logger.warning(
-                    "LLM attempt %d failed: %s", attempt + 1, e,
-                )
+                logger.warning("LLM attempt %d failed: %s", attempt + 1, e)
                 if attempt < _MAX_RETRIES:
                     time.sleep(2 ** attempt)
             except Exception as e:
@@ -79,11 +94,17 @@ class LLMClient:
                 api_key=self._api_key,
                 timeout=_HEALTH_TIMEOUT,
             )
-            resp = health_client.chat.completions.create(
+            kwargs: dict = dict(
                 model=self._model,
                 messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
             )
+            try:
+                resp = health_client.chat.completions.create(**kwargs, max_tokens=1)
+            except APIError as e:
+                if "max_tokens" in str(e):
+                    resp = health_client.chat.completions.create(**kwargs, max_completion_tokens=1)
+                else:
+                    raise
             return bool(resp.choices)
         except Exception as e:
             logger.warning("LLM health check failed: %s", e)
@@ -91,7 +112,6 @@ class LLMClient:
 
     @staticmethod
     def _parse_response(content: str) -> LLMResult | None:
-        """Parse JSON response into LLMResult."""
         try:
             data = json.loads(content)
             return LLMResult(
@@ -109,18 +129,14 @@ class LLMClient:
         folder_name: str,
         tree: dict,
     ) -> LinkPlan | None:
-        """Analyze source directory structure and generate a link plan.
-
-        Returns None if analysis fails after retries.
-        """
+        """Analyze source directory structure and generate a link plan."""
         messages = [
             {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
             {"role": "user", "content": build_structure_prompt(folder_name, tree)},
         ]
-
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                resp = self._client.chat.completions.create(
+                resp = self._create(
                     model=self._model,
                     messages=messages,
                     response_format={"type": "json_object"},
@@ -129,9 +145,7 @@ class LLMClient:
                 content = resp.choices[0].message.content
                 return self._parse_structure_response(content)
             except (APIError, APITimeoutError) as e:
-                logger.warning(
-                    "LLM structure analysis attempt %d failed: %s", attempt + 1, e,
-                )
+                logger.warning("LLM structure analysis attempt %d failed: %s", attempt + 1, e)
                 if attempt < _MAX_RETRIES:
                     time.sleep(2 ** attempt)
             except Exception as e:
@@ -141,7 +155,6 @@ class LLMClient:
 
     @staticmethod
     def _parse_structure_response(content: str) -> LinkPlan | None:
-        """Parse JSON response into LinkPlan."""
         try:
             data = json.loads(content)
             structure_type = StructureType(data["structure_type"])
@@ -164,27 +177,16 @@ class LLMClient:
         parent_context: str,
         depth: int = 0,
     ) -> list[str | None]:
-        """Batch-rename a group of sibling directories.
-
-        Args:
-            siblings: List of dicts with original_name, children_info, sample_files.
-            parent_context: Human-readable description of parent dir.
-            depth: Directory depth (0 = root entry).
-
-        Returns:
-            List of suggested names aligned with input; None entries on failure.
-        """
+        """Batch-rename a group of sibling directories."""
         if not siblings:
             return []
-
         messages = [
             {"role": "system", "content": RENAME_SYSTEM_PROMPT},
             {"role": "user", "content": build_rename_prompt(siblings, parent_context)},
         ]
-
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                resp = self._client.chat.completions.create(
+                resp = self._create(
                     model=self._model,
                     messages=messages,
                     temperature=0.1,
@@ -200,17 +202,11 @@ class LLMClient:
             except Exception as e:
                 logger.error("rename_batch unexpected error: %s", e)
                 return [None] * len(siblings)
-
         return [None] * len(siblings)
 
     @staticmethod
     def _parse_rename_response(content: str, expected: int) -> list[str | None] | None:
-        """Parse JSON array rename response.
-
-        Returns list of names (aligned by index) or None if unparseable.
-        """
         try:
-            # Strip markdown code fences if present
             text = content.strip()
             if text.startswith("```"):
                 text = "\n".join(text.split("\n")[1:])

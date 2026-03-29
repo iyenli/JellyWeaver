@@ -210,6 +210,24 @@ async def _run_rename_tree(
     max_parallel: int,
 ) -> None:
     """Process the rename tree bottom-up, streaming results via WebSocket."""
+    try:
+        await _run_rename_tree_inner(task_id, root, client, st, max_parallel)
+    except Exception as e:
+        logger.error("rename tree task %s failed: %s", task_id, e)
+        await manager.broadcast({
+            "type": "rename_error",
+            "task_id": task_id,
+            "error": str(e),
+        })
+
+
+async def _run_rename_tree_inner(
+    task_id: str,
+    root: TreeNode,
+    client,
+    st,
+    max_parallel: int,
+) -> None:
     semaphore = asyncio.Semaphore(max_parallel)
     # suggested_name map: key -> name (built up during processing)
     suggestions: dict[str, str] = {}
