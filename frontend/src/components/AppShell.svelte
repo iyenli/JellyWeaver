@@ -35,9 +35,9 @@
 							: 'border-[var(--surface0)] bg-[var(--surface0)] hover:border-[var(--sky)] hover:text-[var(--sky)]'}"
 					disabled={reconciling}
 					onclick={handleReconcile}
-					title="重新扫描并更新所有条目状态（不清除 LLM 缓存）"
+					title="Re-scan all sources and update link states (LLM cache is preserved)"
 				>
-					{reconciling ? '重建中…' : '重建状态'}
+					{reconciling ? 'Reconciling…' : 'Reconcile'}
 				</button>
 				<button class="rounded-lg border border-[var(--surface0)] bg-[var(--surface0)] px-4 py-2 text-sm hover:bg-[var(--surface1)]" onclick={onOpenSettings}>
 					Settings

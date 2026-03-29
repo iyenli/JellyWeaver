@@ -275,12 +275,12 @@
 			await refreshSources();
 			await refreshTargets();
 			const parts = [];
-			if (result.newly_linked) parts.push(`${result.newly_linked} 个新识别为已链接`);
-			if (result.reset_to_pending) parts.push(`${result.reset_to_pending} 个重置为待处理`);
-			if (result.removed) parts.push(`${result.removed} 个已删除条目移除`);
-			setToast('success', parts.length ? parts.join('，') : '状态已更新，无变化');
+			if (result.newly_linked) parts.push(`${result.newly_linked} newly linked`);
+			if (result.reset_to_pending) parts.push(`${result.reset_to_pending} reset to pending`);
+			if (result.removed) parts.push(`${result.removed} stale entries removed`);
+			setToast('success', parts.length ? parts.join(', ') : 'State up to date — no changes');
 		} catch (error) {
-			setToast('error', error instanceof Error ? error.message : '重建状态失败');
+			setToast('error', error instanceof Error ? error.message : 'Reconcile failed');
 		}
 	}}>
 	<div class="grid gap-6 xl:grid-cols-2 xl:items-start">
