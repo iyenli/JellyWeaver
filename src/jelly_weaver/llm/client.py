@@ -88,6 +88,9 @@ class LLMClient:
 
     def health_check(self) -> bool:
         """Test connectivity with a minimal API call."""
+        # Use 16 as the minimum token count — some models (e.g. Gemini via proxy)
+        # reject values below 16 for max_output_tokens.
+        _MIN_TOKENS = 16
         try:
             health_client = OpenAI(
                 base_url=self._api_base,
@@ -99,10 +102,18 @@ class LLMClient:
                 messages=[{"role": "user", "content": "hi"}],
             )
             try:
-                resp = health_client.chat.completions.create(**kwargs, max_tokens=1)
+                resp = health_client.chat.completions.create(**kwargs, max_tokens=_MIN_TOKENS)
             except APIError as e:
-                if "max_tokens" in str(e):
-                    resp = health_client.chat.completions.create(**kwargs, max_completion_tokens=1)
+                err = str(e)
+                if "max_tokens" in err:
+                    try:
+                        resp = health_client.chat.completions.create(**kwargs, max_completion_tokens=_MIN_TOKENS)
+                    except APIError as e2:
+                        err2 = str(e2)
+                        if "max_completion_tokens" in err2 or "max_output_tokens" in err2:
+                            resp = health_client.chat.completions.create(**kwargs, max_output_tokens=_MIN_TOKENS)
+                        else:
+                            raise
                 else:
                     raise
             return bool(resp.choices)
