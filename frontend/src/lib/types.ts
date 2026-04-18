@@ -9,6 +9,7 @@ export interface EntryItem {
 	status: EntryStatus;
 	target_path?: string | null;
 	linked_at?: string | null;
+	is_file?: boolean;
 }
 
 export interface SourceSummary {
@@ -26,6 +27,7 @@ export interface TargetSection {
 export interface TargetContentItem {
 	name: string;
 	path: string;
+	is_file?: boolean;
 }
 
 export interface Settings {
@@ -35,6 +37,8 @@ export interface Settings {
 	api_key_configured: boolean;
 	api_key_preview: string;
 	max_parallel: number;
+	jellyfin_url?: string;
+	jellyfin_api_key_configured?: boolean;
 	state_file_path?: string;
 	state_file_exists?: boolean;
 	llm_settings_file_path?: string;
@@ -67,8 +71,9 @@ export interface ParseResult {
 
 export interface LinkRequest extends ParseResult {
 	source_path: string;
+	source_paths?: string[];
+	companion_paths?: string[];
 	section_id: string;
-	link_plan?: PlanItem[] | null;
 	tree_plan?: RenameNode | null;
 }
 
@@ -76,26 +81,6 @@ export interface LinkResult {
 	linked: number;
 	skipped: number;
 	errors: string[];
-}
-
-export type StructureType =
-	| 'tv_single_season'
-	| 'tv_multi_season'
-	| 'movie_single'
-	| 'movie_collection'
-	| 'unknown';
-
-export interface PlanItem {
-	source_subdir: string;
-	target_subdir: string;
-	title_en: string;
-	year: number;
-	file_count: number;
-}
-
-export interface LinkPlan {
-	structure_type: StructureType;
-	items: PlanItem[];
 }
 
 // --- Rename tree types ---
@@ -115,9 +100,15 @@ export interface RenameNode {
 
 export type RenameNodeStatus = 'pending' | 'loading' | 'done' | 'kept' | 'accepted' | 'edited';
 
+export interface CompanionFile {
+	name: string;
+	path: string;
+}
+
 export interface RenameTreeResult {
 	task_id: string;
 	tree: RenameNode;
+	companion_files: CompanionFile[];
 }
 
 // --- WebSocket messages ---
@@ -167,6 +158,21 @@ export interface WsRenameError {
 	error: string;
 }
 
+export interface WsRelinkProgress {
+	type: 'relink_progress';
+	task_id: string;
+	done: number;
+	total: number;
+}
+
+export interface WsRelinkDone {
+	type: 'relink_done';
+	task_id: string;
+	relinked: number;
+	unlinked_only: number;
+	errors: string[];
+}
+
 export type WsMessage =
 	| WsLinkProgress
 	| WsLinkDone
@@ -174,5 +180,7 @@ export type WsMessage =
 	| WsStateChanged
 	| WsRenameNodeDone
 	| WsRenameTreeDone
-	| WsRenameError;
+	| WsRenameError
+	| WsRelinkProgress
+	| WsRelinkDone;
 

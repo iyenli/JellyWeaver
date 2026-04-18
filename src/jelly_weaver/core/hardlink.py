@@ -2,12 +2,14 @@
 
 import os
 import shutil
+import stat
 from pathlib import Path
 
 from .models import LinkResult, SourceStructure
 from .media_parser import (
     classify_source,
     is_media_file,
+    is_video_file,
     parse_episode,
     parse_season_dir,
 )
@@ -172,15 +174,88 @@ def link_with_plan(
     return result
 
 
+def _lcp_len(a: str, b: str) -> int:
+    """Case-insensitive longest common prefix length."""
+    al, bl = a.lower(), b.lower()
+    n = min(len(al), len(bl))
+    for i in range(n):
+        if al[i] != bl[i]:
+            return i
+    return n
+
+
+def _companion_files(video_file: Path) -> list[Path]:
+    """Find companion subtitle/meta files via longest-common-prefix matching.
+
+    A sibling is a companion when:
+      LCP(video_stem, sibling_name) >= min(len(video_stem), 8)
+
+    This tolerates common real-world patterns:
+      Movie.Name.2022.1080p.mkv  →  Movie.Name.2022.chi.srt   (exact stem prefix)
+      Movie.Name.2022.1080p.mkv  →  Movie.Name.2022.srt        (shorter subtitle)
+      Movie.Name.2022.mkv        →  Movie.Name.srt             (8-char LCP: "Movie.Na")
+    """
+    video_stem = video_file.stem
+    threshold = min(len(video_stem), 8)
+    result = []
+    for sibling in sorted(video_file.parent.iterdir()):
+        if sibling == video_file or not sibling.is_file():
+            continue
+        if not (is_media_file(sibling) and not is_video_file(sibling)):
+            continue
+        if _lcp_len(video_stem, sibling.name) >= threshold:
+            result.append(sibling)
+    return result
+
+
+def link_file_group(
+    src_files: list[Path],
+    dst: Path,
+    progress_cb=None,
+    extra_files: list[Path] | None = None,
+) -> LinkResult:
+    """Hardlink video files + companion subtitles into dst.
+
+    If extra_files is provided it is used as the companion list (user-confirmed
+    selection). Otherwise companions are discovered automatically via LCP matching.
+    """
+    all_files: list[Path] = []
+    for f in src_files:
+        all_files.append(f)
+        companions = extra_files if extra_files is not None else _companion_files(f)
+        all_files.extend(companions)
+
+    if all_files:
+        _check_same_device(all_files[0], dst)
+    result = LinkResult()
+    for i, f in enumerate(all_files):
+        _hardlink_file(f, dst / f.name, result)
+        if progress_cb:
+            progress_cb(i + 1, len(all_files))
+    return result
+
+
+def _handle_rmtree_error(func, path, exc_info):
+    """Error handler for shutil.rmtree: make read-only files writable before retry.
+
+    On Windows, files can be marked read-only, causing shutil.rmtree to fail.
+    This handler clears the read-only attribute and retries the operation.
+    Note: since these are hardlinks, this also affects the source file's attributes.
+    """
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
 def unlink_target(target_dir: Path) -> int:
     """Remove a hardlinked target directory. Returns the number of files removed.
 
     Since these are hardlinks, removing them does not delete the original source files.
+    Raises OSError if files are locked by another process (e.g. Jellyfin streaming).
     """
     if not target_dir.is_dir():
         return 0
     count = sum(1 for f in target_dir.rglob("*") if f.is_file())
-    shutil.rmtree(target_dir)
+    shutil.rmtree(target_dir, onerror=_handle_rmtree_error)
     return count
 
 
@@ -189,6 +264,8 @@ def link_with_tree(
     dst: Path,
     tree: dict,
     progress_cb=None,
+    *,
+    media_type: str = "movie",
 ) -> LinkResult:
     """Hardlink files using a rename tree (accepted-name recursive mapping).
 
@@ -204,14 +281,39 @@ def link_with_tree(
     For the root node the accepted name is already baked into dst by the caller
     (dst = target_section_path / root_accepted_name).
 
+    For flat TV shows (media_type="tv", no dir children in tree), episode files
+    are automatically grouped into Season XX subfolders by SxxExx pattern.
+
     Args:
         src: Source directory (root entry on disk).
         dst: Destination directory (already includes root accepted name).
         tree: Serialised TreeNode dict (with 'accepted_name' fields added).
         progress_cb: Optional (current, total) callback.
+        media_type: "tv" or "movie" — controls flat-file season grouping.
     """
     _check_same_device(src, dst)
     result = LinkResult()
+
+    # For flat TV shows (no dir children in tree), group episodes into Season XX/
+    dir_children = [c for c in tree.get("children", []) if c.get("is_dir", True)]
+    if media_type == "tv" and not dir_children:
+        grouped: dict[int, list[Path]] = {}
+        for f in src.rglob("*"):
+            if not f.is_file() or not is_media_file(f):
+                continue
+            ep = parse_episode(f.name)
+            season = ep[0] if ep else 1
+            grouped.setdefault(season, []).append(f)
+        total = sum(len(v) for v in grouped.values())
+        count = 0
+        for season, files in sorted(grouped.items()):
+            season_dir = dst / f"Season {season:02d}"
+            for f in sorted(files):
+                _hardlink_file(f, season_dir / f.name, result)
+                count += 1
+                if progress_cb:
+                    progress_cb(count, total)
+        return result
 
     # Collect all (src_file, dst_file) pairs by walking the tree
     all_files: list[tuple[Path, Path]] = []

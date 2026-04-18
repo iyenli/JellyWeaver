@@ -3,14 +3,14 @@
 from pathlib import Path
 
 from .models import EntryRecord, EntryStatus, AppState, TargetSection
-from .media_parser import is_media_file
+from .media_parser import is_media_file, is_video_file
 from .tree import build_tree, name_hash
 
 
 def scan_source(path: str) -> list[dict]:
-    """List first-level subdirectories with media file counts.
+    """List first-level subdirectories and loose media files with counts.
 
-    Returns list of {"path": str, "name": str, "file_count": int}.
+    Returns list of {"path": str, "name": str, "file_count": int, "is_file": bool}.
     """
     root = Path(path)
     if not root.is_dir():
@@ -18,17 +18,33 @@ def scan_source(path: str) -> list[dict]:
 
     results = []
     for child in sorted(root.iterdir()):
-        if not child.is_dir():
+        if child.name.startswith("."):
             continue
-        count = sum(
-            1 for f in child.rglob("*")
-            if f.is_file() and is_media_file(f)
-        )
-        results.append({
-            "path": str(child),
-            "name": child.name,
-            "file_count": count,
-        })
+        if child.is_dir():
+            count = sum(
+                1 for f in child.rglob("*")
+                if f.is_file() and is_media_file(f)
+            )
+            results.append({
+                "path": str(child),
+                "name": child.name,
+                "file_count": count,
+                "is_file": False,
+            })
+        elif child.is_file() and is_video_file(child):
+            # Count companion files (subtitles, etc.) that share the same stem
+            companions = [
+                f for f in root.iterdir()
+                if f != child and f.is_file()
+                and is_media_file(f) and not is_video_file(f)
+                and f.name.startswith(child.stem)
+            ]
+            results.append({
+                "path": str(child),
+                "name": child.name,
+                "file_count": 1 + len(companions),
+                "is_file": True,
+            })
     return results
 
 
@@ -96,6 +112,27 @@ def reconcile_entries(
                 continue
 
         result.append(item)
+    return result
+
+
+def build_target_hash_map(target_sections: list[TargetSection]) -> dict[str, str]:
+    """Compute Merkle hashes for all first-level subdirectories in every target section.
+
+    Returns {merkle_hash: full_path}.  Used to detect source entries whose file
+    tree is identical to an existing target directory (e.g. hardlinks created
+    outside of Jelly Weaver, or entries linked before state tracking began).
+    """
+    result: dict[str, str] = {}
+    for section in target_sections:
+        if not section.path:
+            continue
+        section_dir = Path(section.path)
+        if not section_dir.is_dir():
+            continue
+        for child in section_dir.iterdir():
+            if child.is_dir() and not child.name.startswith("."):
+                tree = build_tree(child, depth=0)
+                result[tree.key] = str(child)
     return result
 
 

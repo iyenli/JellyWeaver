@@ -5,9 +5,9 @@
 	export let open = false;
 	export let value: Settings = { api_base: '', model: '', api_key: '', api_key_configured: false, api_key_preview: '', max_parallel: 5 };
 	export let onClose: () => void = () => {};
-	export let onSave: (patch: Partial<Settings>) => void | Promise<void> = () => {};
+	export let onSave: (patch: Partial<Settings> & { jellyfin_api_key?: string }) => void | Promise<void> = () => {};
 
-	let draft = { api_base: '', model: '', api_key: '', max_parallel: 5 };
+	let draft = { api_base: '', model: '', api_key: '', max_parallel: 5, jellyfin_url: '', jellyfin_api_key: '' };
 	let llmStatus: LlmCheckResult | null = null;
 	let llmChecking = false;
 	let prevOpen = false;
@@ -15,7 +15,7 @@
 	$: if (open !== prevOpen) {
 		prevOpen = open;
 		if (open) {
-			draft = { api_base: value.api_base ?? '', model: value.model ?? '', api_key: '', max_parallel: value.max_parallel ?? 5 };
+			draft = { api_base: value.api_base ?? '', model: value.model ?? '', api_key: '', max_parallel: value.max_parallel ?? 5, jellyfin_url: value.jellyfin_url ?? '', jellyfin_api_key: '' };
 			llmStatus = null;
 		}
 	}
@@ -30,6 +30,9 @@
 	}
 	$: if (open && draft.max_parallel === 5 && value.max_parallel && value.max_parallel !== 5) {
 		draft.max_parallel = value.max_parallel;
+	}
+	$: if (open && !draft.jellyfin_url && value.jellyfin_url) {
+		draft.jellyfin_url = value.jellyfin_url;
 	}
 
 	async function handleLlmCheck() {
@@ -112,6 +115,22 @@
 			</div>
 		</div>
 
+		<!-- Jellyfin Section -->
+		<div class="mb-5">
+			<h4 class="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--subtext0)]">Jellyfin</h4>
+			<div class="space-y-3">
+				<label class="block space-y-1 text-sm">
+					<span class="text-[var(--subtext0)]">Server URL</span>
+					<input class="w-full rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2" placeholder="http://localhost:8096" bind:value={draft.jellyfin_url} />
+				</label>
+				<label class="block space-y-1 text-sm">
+					<span class="text-[var(--subtext0)]">API Key</span>
+					<input class="w-full rounded-lg border border-[var(--surface0)] bg-[var(--base)] px-3 py-2" type="password" bind:value={draft.jellyfin_api_key} placeholder={value.jellyfin_api_key_configured ? 'Configured' : 'Paste API key'} />
+					<span class="text-xs text-[var(--overlay0)]">Dashboard → API Keys → + 新建密钥</span>
+				</label>
+			</div>
+		</div>
+
 		<!-- Maintenance Section -->
 		<div class="mb-5">
 			<h4 class="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--subtext0)]">Maintenance</h4>
@@ -165,8 +184,10 @@
 			<button class="rounded-lg bg-[var(--blue)] px-4 py-2 text-sm font-medium text-[var(--crust)] hover:brightness-110" onclick={() => {
 				// Only include api_key in the patch if the user actually typed a new one.
 				// Leaving the field blank means "keep the existing key".
-				const { api_key, ...rest } = draft;
-				onSave(api_key ? { ...rest, api_key } : rest);
+				const { api_key, jellyfin_api_key, ...rest } = draft;
+				const patch: Parameters<typeof onSave>[0] = api_key ? { ...rest, api_key } : rest;
+				if (jellyfin_api_key) patch.jellyfin_api_key = jellyfin_api_key;
+				onSave(patch);
 			}}>
 				Save
 			</button>

@@ -5,11 +5,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
-class MediaType(Enum):
-    MOVIE = "movie"
-    TV = "tv"
-
-
 class EntryStatus(Enum):
     PENDING = "pending"
     LINKED = "linked"
@@ -20,22 +15,6 @@ class SourceStructure(Enum):
     HAS_SEASON_DIRS = "has_season_dirs"
     FLAT_WITH_EPISODES = "flat_with_episodes"
     SIMPLE = "simple"
-
-
-class StructureType(str, Enum):
-    TV_SINGLE_SEASON = "tv_single_season"
-    TV_MULTI_SEASON = "tv_multi_season"
-    MOVIE_SINGLE = "movie_single"
-    MOVIE_COLLECTION = "movie_collection"
-    UNKNOWN = "unknown"
-
-
-@dataclass
-class LLMResult:
-    media_type: MediaType
-    title_en: str
-    title_zh: str
-    year: int
 
 
 @dataclass
@@ -63,21 +42,6 @@ class LinkResult:
 
 
 @dataclass
-class PlanItem:
-    source_subdir: str
-    target_subdir: str
-    title_en: str = ""
-    year: int = 0
-    file_count: int = 0
-
-
-@dataclass
-class LinkPlan:
-    structure_type: StructureType
-    items: list[PlanItem] = field(default_factory=list)
-
-
-@dataclass
 class AppState:
     sources: list[str] = field(default_factory=list)
     target_sections: list[TargetSection] = field(default_factory=list)
@@ -89,3 +53,5 @@ class AppState:
     })
     # Merkle-key → LLM-suggested name (persisted cache)
     name_cache: dict[str, str] = field(default_factory=dict)
+    # root Merkle-key → "tv" | "movie" (persisted alongside name_cache)
+    media_type_cache: dict[str, str] = field(default_factory=dict)

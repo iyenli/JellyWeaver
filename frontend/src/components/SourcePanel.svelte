@@ -11,6 +11,7 @@
 	export let onRemoveSource: (path: string) => void | Promise<void> = () => {};
 	export let onToggleIgnored: (path: string, nextIgnored: boolean) => void | Promise<void> = () => {};
 	export let onSmartAdd: (path: string) => void | Promise<void> = () => {};
+	export let onGroupFiles: (paths: string[]) => void | Promise<void> = () => {};
 	export let onShowCompletedChange: (value: boolean) => void = () => {};
 	export let onShowIgnoredChange: (value: boolean) => void = () => {};
 	export let onSearchChange: (value: string) => void = () => {};
@@ -66,7 +67,7 @@
 					</button>
 				</div>
 
-				<SourceTree {showCompleted} {showIgnored} {searchText} entries={source.entries} {onToggleIgnored} {onSmartAdd} />
+				<SourceTree {showCompleted} {showIgnored} {searchText} entries={source.entries} {onToggleIgnored} {onSmartAdd} {onGroupFiles} />
 			</div>
 		{/each}
 

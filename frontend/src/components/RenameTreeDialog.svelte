@@ -1,29 +1,57 @@
 <script lang="ts">
-	import type { MediaType, RenameNode } from '$lib/types';
+	import type { CompanionFile, MediaType, RenameNode, TargetSection } from '$lib/types';
 	import RenameTreeView from './RenameTreeView.svelte';
 
 	export let open = false;
 	export let sourceName = '';
-	export let sectionName = '';
+	export let targets: TargetSection[] = [];
+	export let initialSectionId: string = '';
 	export let tree: RenameNode | null = null;
 	export let loading = false;
 	export let error: string | null = null;
 	export let mediaType: MediaType | null = null;
 	export let resolvedCount = 0;
 	export let totalDirCount = 0;
+	export let companionFiles: CompanionFile[] = [];
 	export let onClose: () => void;
-	export let onConfirm: (tree: RenameNode, mediaType: MediaType) => void | Promise<void>;
+	export let onConfirm: (tree: RenameNode, mediaType: MediaType, sectionId: string, companionPaths: string[]) => void | Promise<void>;
 
 	let regenLoadingKeys = new Set<string>();
 	let localMediaType: MediaType = mediaType ?? 'tv';
 	$: localMediaType = mediaType ?? 'tv';
+
+	let localSectionId: string = initialSectionId;
+	$: if (open) localSectionId = initialSectionId;
+
+	// Companion file selection: reset whenever the list changes
+	let selectedCompanionPaths = new Set<string>();
+	$: {
+		companionFiles;
+		selectedCompanionPaths = new Set(companionFiles.map((c) => c.path));
+	}
+
+	function toggleCompanion(path: string) {
+		const next = new Set(selectedCompanionPaths);
+		if (next.has(path)) next.delete(path);
+		else next.add(path);
+		selectedCompanionPaths = next;
+	}
+
+	// When LLM resolves media type, auto-switch to first matching library
+	$: if (mediaType) {
+		const targetMediaType = mediaType === 'movie' ? 'movies' : 'tv';
+		const match = targets.find((t) => t.media_type === targetMediaType);
+		if (match) localSectionId = match.id;
+	}
+
+	$: sectionName = targets.find((t) => t.id === localSectionId)?.name ?? '';
 
 	$: if (tree) totalDirCount = countDirs(tree);
 	function countDirs(n: RenameNode): number {
 		return (n.is_dir ? 1 : 0) + n.children.reduce((a, c) => a + countDirs(c), 0);
 	}
 
-	$: canConfirm = tree !== null && !loading && !error;
+	$: canConfirm = tree !== null && !loading && !error && !!localSectionId;
 
 	function updateNode(root: RenameNode, key: string, updater: (n: RenameNode) => void): RenameNode {
 		function walk(n: RenameNode): RenameNode {
@@ -56,9 +84,10 @@
 	}
 
 	async function handleConfirm() {
-		if (!tree || !localMediaType) return;
+		if (!tree || !localMediaType || !localSectionId) return;
 		const rootAccepted = tree.accepted_name ?? tree.suggested_name ?? tree.name;
-		await onConfirm({ ...tree, accepted_name: rootAccepted }, localMediaType);
+		const companionPaths = [...selectedCompanionPaths];
+		await onConfirm({ ...tree, accepted_name: rootAccepted }, localMediaType, localSectionId, companionPaths);
 	}
 
 	export function applyNodeUpdate(key: string, suggestedName: string) {
@@ -79,7 +108,7 @@
 </script>
 
 {#if open}
-	<div class="backdrop" on:click={onClose} role="presentation"></div>
+	<div class="backdrop" onclick={onClose} role="presentation"></div>
 
 	<div class="dialog" role="dialog" aria-modal="true">
 		<!-- Header -->
@@ -88,7 +117,7 @@
 				<div class="header-title">重命名目录树</div>
 				<div class="header-sub">{sourceName} → {sectionName}</div>
 			</div>
-			<button class="close-btn" on:click={onClose}>✕</button>
+			<button class="close-btn" onclick={onClose}>✕</button>
 		</div>
 
 		<!-- Meta row -->
@@ -96,9 +125,18 @@
 			<div class="type-group">
 				<span class="meta-label">类型</span>
 				<div class="type-btns">
-					<button class="type-btn" class:active={localMediaType === 'movie'} on:click={() => (localMediaType = 'movie')}>🎬 电影</button>
-					<button class="type-btn" class:active={localMediaType === 'tv'}    on:click={() => (localMediaType = 'tv')}>📺 剧集</button>
+					<button class="type-btn" class:active={localMediaType === 'movie'} onclick={() => (localMediaType = 'movie')}>🎬 电影</button>
+					<button class="type-btn" class:active={localMediaType === 'tv'}    onclick={() => (localMediaType = 'tv')}>📺 剧集</button>
 				</div>
+			</div>
+
+			<div class="library-group">
+				<span class="meta-label">目标库</span>
+				<select class="library-select" bind:value={localSectionId}>
+					{#each targets as t}
+						<option value={t.id}>{t.name}</option>
+					{/each}
+				</select>
 			</div>
 
 			{#if loading}
@@ -110,6 +148,28 @@
 
 		{#if error}
 			<div class="error-bar">⚠ {error}</div>
+		{/if}
+
+		{#if companionFiles.length > 0}
+			<div class="companion-bar">
+				<div class="companion-header">
+					<span class="companion-icon">📎</span>
+					<span>发现 {companionFiles.length} 个伴随文件（勾选后一起 link）</span>
+				</div>
+				<div class="companion-list">
+					{#each companionFiles as cf (cf.path)}
+						<label class="companion-item">
+							<input
+								type="checkbox"
+								checked={selectedCompanionPaths.has(cf.path)}
+								onchange={() => toggleCompanion(cf.path)}
+								class="companion-check"
+							/>
+							<span class="companion-name">{cf.name}</span>
+						</label>
+					{/each}
+				</div>
+			</div>
 		{/if}
 
 		<!-- Tree -->
@@ -134,8 +194,8 @@
 
 		<!-- Footer -->
 		<div class="dialog-footer">
-			<button class="btn-cancel" on:click={onClose}>取消</button>
-			<button class="btn-confirm" disabled={!canConfirm} on:click={handleConfirm}>
+			<button class="btn-cancel" onclick={onClose}>取消</button>
+			<button class="btn-confirm" disabled={!canConfirm} onclick={handleConfirm}>
 				{loading ? '⏳ 分析中…' : '开始 Link'}
 			</button>
 		</div>
@@ -204,6 +264,17 @@
 	}
 	.type-btn.active { background: var(--blue); border-color: var(--blue); color: var(--base); font-weight: 500; }
 
+	.library-group { display: flex; align-items: center; }
+	.library-select {
+		background: var(--surface0);
+		border: 1px solid var(--surface2);
+		border-radius: 5px;
+		color: var(--text);
+		cursor: pointer; padding: 3px 8px; font-size: 0.78rem;
+		outline: none;
+	}
+	.library-select:focus { border-color: var(--blue); }
+
 	.progress-text { color: var(--yellow); font-size: 0.8rem; }
 	.done-badge { color: var(--green); font-size: 0.8rem; }
 
@@ -213,6 +284,25 @@
 		color: var(--red);
 		padding: 7px 18px; font-size: 0.8rem; flex-shrink: 0;
 	}
+
+	.companion-bar {
+		border-left: 3px solid var(--teal);
+		background: color-mix(in srgb, var(--teal) 8%, transparent);
+		padding: 8px 18px; flex-shrink: 0;
+	}
+	.companion-header {
+		display: flex; align-items: center; gap: 6px;
+		color: var(--teal); font-size: 0.78rem; margin-bottom: 5px;
+	}
+	.companion-icon { font-size: 0.85rem; }
+	.companion-list { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+	.companion-item {
+		display: flex; align-items: center; gap: 5px;
+		cursor: pointer; font-size: 0.76rem; color: var(--subtext0);
+	}
+	.companion-item:hover { color: var(--text); }
+	.companion-check { accent-color: var(--teal); cursor: pointer; }
+	.companion-name { font-family: monospace; }
 
 	.tree-scroll {
 		flex: 1; overflow-y: auto;

@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { MediaType, RenameNode } from '$lib/types';
+import type { CompanionFile, MediaType, RenameNode } from '$lib/types';
 
 export const showCompleted = writable(false);
 export const showIgnored = writable(false);
@@ -12,7 +12,9 @@ export const selectedTargetId = writable<string | null>(null);
 export const pickedPath = writable('');
 export const dragPath = writable<string | null>(null);
 export const pendingSourcePath = writable<string | null>(null);
+export const pendingSourcePaths = writable<string[] | null>(null);  // file group
 export const pendingSectionId = writable<string | null>(null);
+export const companionFiles = writable<CompanionFile[]>([]);  // companion subtitle files
 
 // Rename tree state (replaces pendingParse / pendingLinkPlan)
 export const renameTree = writable<RenameNode | null>(null);

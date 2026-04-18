@@ -71,6 +71,7 @@ async def delete_target(section_id: str):
 @router.get("/{section_id}/contents")
 def list_target_contents(section_id: str):
     from pathlib import Path
+    from jelly_weaver.core.media_parser import is_media_file
     st = get_state()
     section = st.get_target_section(section_id)
     if section is None:
@@ -79,6 +80,10 @@ def list_target_contents(section_id: str):
         return {"items": []}
     items = []
     for child in sorted(Path(section.path).iterdir()):
-        if child.is_dir() and not child.name.startswith("."):
-            items.append({"name": child.name, "path": str(child)})
+        if child.name.startswith("."):
+            continue
+        if child.is_dir():
+            items.append({"name": child.name, "path": str(child), "is_file": False})
+        elif child.is_file() and is_media_file(child):
+            items.append({"name": child.name, "path": str(child), "is_file": True})
     return {"items": items}

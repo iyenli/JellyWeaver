@@ -11,10 +11,12 @@
 	import { api } from '$lib/api';
 	import { loading, refreshAll, refreshSettings, refreshSources, refreshTargets, settings, sources, targetContents, targets } from '$lib/stores/state';
 	import {
+		companionFiles,
 		dirPickerMode,
 		dirPickerOpen,
 		pendingSectionId,
 		pendingSourcePath,
+		pendingSourcePaths,
 		progress,
 		renameDialogOpen,
 		renameTree,
@@ -72,7 +74,9 @@
 
 	function clearPendingState() {
 		pendingSourcePath.set(null);
+		pendingSourcePaths.set(null);
 		pendingSectionId.set(null);
+		companionFiles.set([]);
 		renameTree.set(null);
 		renameTreeTaskId.set(null);
 		renameTreeLoading.set(false);
@@ -83,19 +87,30 @@
 		resolvedNodeCount = 0;
 	}
 
-	function startRenameTree(sourcePath: string) {
+	function startRenameTree(sourcePath: string, sourcePaths?: string[]) {
 		renameTreeLoading.set(true);
 		renameTreeError.set(null);
 		renameTree.set(null);
 		renameTreeMediaType.set(null);
 		resolvedNodeCount = 0;
 
-		api.startRenameTree(sourcePath)
+		api.startRenameTree(sourcePath, sourcePaths)
 			.then((result) => {
 				renameTreeTaskId.set(result.task_id);
 				renameTree.set(result.tree);
+				companionFiles.set(result.companion_files ?? []);
 				// Count nodes already resolved from cache
 				resolvedNodeCount = countResolved(result.tree);
+				// If all nodes are resolved from cache, no LLM calls are needed.
+				// The background task's rename_tree_done WS message would arrive before
+				// renameTreeTaskId is set (race condition), so handle it here instead.
+				if (resolvedNodeCount >= countDirs(result.tree)) {
+					const hasSeasons = result.tree.children.some(
+						(c) => c.suggested_name?.startsWith('Season ')
+					);
+					renameTreeMediaType.set(hasSeasons ? 'tv' : 'movie');
+					renameTreeLoading.set(false);
+				}
 			})
 			.catch((err) => {
 				renameTreeError.set(err instanceof Error ? err.message : 'Tree analysis failed');
@@ -160,17 +175,20 @@
 		startRenameTree(sourcePath);
 	}
 
-	async function handleConfirm(tree: RenameNode, mediaType: MediaType) {
+	async function handleConfirm(tree: RenameNode, mediaType: MediaType, sectionId: string, companionPaths: string[]) {
 		const sourcePath = get(pendingSourcePath);
-		const sectionId = get(pendingSectionId) ?? get(selectedTargetId);
-		if (!sourcePath || !sectionId) return;
+		const sourcePaths = get(pendingSourcePaths);
+		if (!sourcePath && !sourcePaths?.length) return;
+		if (!sectionId) return;
 
 		const rootAccepted = tree.accepted_name ?? tree.suggested_name ?? tree.name;
 
 		try {
 			renameDialogOpen.set(false);
 			const result = await api.startLink({
-				source_path: sourcePath,
+				source_path: sourcePath ?? '',
+				source_paths: sourcePaths ?? undefined,
+				companion_paths: companionPaths.length > 0 ? companionPaths : undefined,
 				section_id: sectionId,
 				media_type: mediaType,
 				title_en: rootAccepted,
@@ -195,11 +213,28 @@
 		}
 		const firstTarget = allTargets[0];
 		pendingSourcePath.set(sourcePath);
+		pendingSourcePaths.set(null);
 		pendingSectionId.set(firstTarget.id);
 		selectedTargetId.set(firstTarget.id);
 		activeSectionId = firstTarget.id;
 		renameDialogOpen.set(true);
 		startRenameTree(sourcePath);
+	}
+
+	async function handleGroupFiles(paths: string[]) {
+		const allTargets = get(targets);
+		if (!allTargets.length) {
+			setToast('error', 'No libraries configured — add one first');
+			return;
+		}
+		const firstTarget = allTargets[0];
+		pendingSourcePath.set(null);
+		pendingSourcePaths.set(paths);
+		pendingSectionId.set(firstTarget.id);
+		selectedTargetId.set(firstTarget.id);
+		activeSectionId = firstTarget.id;
+		renameDialogOpen.set(true);
+		startRenameTree('', paths);
 	}
 
 	async function handleWsMessage(message: WsMessage) {
@@ -230,6 +265,7 @@
 		}
 		if (message.type === 'rename_tree_done') {
 			if (message.task_id === get(renameTreeTaskId)) {
+				renameTreeMediaType.set(message.media_type as MediaType);
 				renameTreeLoading.set(false);
 				renameDialogRef?.applyTreeDone(message.tree, message.media_type);
 			}
@@ -239,6 +275,25 @@
 			if (message.task_id === get(renameTreeTaskId)) {
 				renameTreeLoading.set(false);
 				renameTreeError.set(message.error);
+			}
+			return;
+		}
+		if (message.type === 'relink_progress') {
+			progress.set({ taskId: message.task_id, current: message.done, total: message.total });
+			return;
+		}
+		if (message.type === 'relink_done') {
+			progress.set(null);
+			await refreshSources();
+			await refreshTargets();
+			const parts = [];
+			if (message.relinked) parts.push(`${message.relinked} re-linked`);
+			if (message.unlinked_only) parts.push(`${message.unlinked_only} unlinked (no cache — drag to re-link)`);
+			const msg = parts.length ? parts.join(', ') : 'No items to re-link';
+			if (message.errors.length) {
+				setToast('error', `${msg}; ${message.errors[0]}`);
+			} else {
+				setToast(message.relinked > 0 ? 'success' : 'info', msg);
 			}
 			return;
 		}
@@ -374,6 +429,45 @@
 				renameDialogOpen.set(true);
 				startRenameTree(sourcePath);
 			}}
+		onRenameAll={async (sectionId) => {
+				try {
+					const result = await api.renameLibrary(sectionId);
+					await refreshTargets();
+					const parts = [];
+					if (result.renamed) parts.push(`${result.renamed} 个已重命名`);
+					if (result.unchanged) parts.push(`${result.unchanged} 个无需更改`);
+					if (result.no_cache) parts.push(`${result.no_cache} 个无缓存名称`);
+					const msg = parts.length ? parts.join('，') : '没有可重命名的文件夹';
+					if (result.errors.length) {
+						setToast('error', `${msg}；${result.errors[0]}`);
+					} else {
+						setToast(result.renamed > 0 ? 'success' : 'info', msg);
+					}
+				} catch (error) {
+					setToast('error', error instanceof Error ? error.message : '批量重命名失败');
+				}
+			}}
+		onJellyfinScan={async (sectionId) => {
+				try {
+					const result = await api.jellyfinScan(sectionId);
+					setToast('success', result.matched_library ? 'Jellyfin 刮削已触发（精确匹配）' : 'Jellyfin 全库刮削已触发');
+				} catch (error) {
+					setToast('error', error instanceof Error ? error.message : 'Jellyfin 刮削请求失败');
+				}
+			}}
+		onRelinkAll={async (sectionId) => {
+				try {
+					const result = await api.relinkSection(sectionId);
+					if (result.total === 0) {
+						setToast('info', 'No linked items to re-link');
+						return;
+					}
+					progress.set({ taskId: result.task_id, current: 0, total: result.total });
+					setToast('info', `Relink started: ${result.total} items`);
+				} catch (error) {
+					setToast('error', error instanceof Error ? error.message : 'Relink All failed');
+				}
+			}}
 		/>
 	</div>
 </AppShell>
@@ -394,13 +488,15 @@
 	bind:this={renameDialogRef}
 	open={$renameDialogOpen}
 	sourceName={$pendingSourcePath?.split(/[/\\]/).at(-1) ?? ''}
-	sectionName={$targets.find((t) => t.id === ($pendingSectionId ?? $selectedTargetId))?.name ?? ''}
+	targets={$targets}
+	initialSectionId={$pendingSectionId ?? $selectedTargetId ?? ''}
 	tree={$renameTree}
 	loading={$renameTreeLoading}
 	error={$renameTreeError}
 	mediaType={$renameTreeMediaType}
 	resolvedCount={resolvedNodeCount}
 	totalDirCount={$renameTree ? countDirs($renameTree) : 0}
+	companionFiles={$companionFiles}
 	onClose={() => {
 		renameDialogOpen.set(false);
 		clearPendingState();

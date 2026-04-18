@@ -6,10 +6,20 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .media_parser import is_media_file
+from .media_parser import is_media_file, is_video_file, is_subtitle_file
 
 _SAMPLE_LIMIT = 5
 _MAX_DEPTH = 4
+
+
+def _is_hash_file(path: Path) -> bool:
+    """Only video and subtitle files contribute to the Merkle hash.
+
+    Metadata files (.nfo, images, etc.) are excluded because they can be
+    added or modified by media managers (e.g. Jellyfin) without changing
+    the actual content, which would cause false hash mismatches.
+    """
+    return is_video_file(path) or is_subtitle_file(path)
 
 
 def name_hash(name: str) -> str:
@@ -62,7 +72,7 @@ def build_tree(path: Path, depth: int = 0, max_depth: int = _MAX_DEPTH) -> TreeN
             key=name_hash(path.name),
             is_dir=False,
             depth=depth,
-            file_count=1 if is_media_file(path) else 0,
+            file_count=1 if _is_hash_file(path) else 0,
         )
 
     # Directory ---
@@ -80,7 +90,7 @@ def build_tree(path: Path, depth: int = 0, max_depth: int = _MAX_DEPTH) -> TreeN
             continue
 
         if child.is_file():
-            if is_media_file(child):
+            if _is_hash_file(child):
                 total_media += 1
                 if len(sample_files) < _SAMPLE_LIMIT:
                     sample_files.append(child.name)
@@ -123,7 +133,28 @@ def build_tree(path: Path, depth: int = 0, max_depth: int = _MAX_DEPTH) -> TreeN
     )
 
 
-def collect_sibling_groups(root: TreeNode) -> list[list[TreeNode]]:
+def build_file_group_tree(files: list[Path]) -> TreeNode:
+    """Build a virtual directory TreeNode for a group of loose files.
+
+    The Merkle key is computed identically to a real flat directory containing
+    those files, so name_cache lookup works transparently with reconcile.
+    """
+    sorted_files = sorted(files, key=lambda f: f.name)
+    child_keys = [name_hash(f.name) for f in sorted_files]
+    key = dir_hash(child_keys) if child_keys else name_hash("empty-group")
+    sample = [f.name for f in sorted_files[:_SAMPLE_LIMIT]]
+    return TreeNode(
+        name="",
+        key=key,
+        is_dir=True,
+        depth=0,
+        children=[],
+        sample_files=sample,
+        file_count=len(sorted_files),
+    )
+
+
+
     """Return sibling groups ordered deepest-first (bottom-up BFS).
 
     Each group is a list of directory siblings sharing the same parent.

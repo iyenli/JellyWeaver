@@ -142,11 +142,32 @@ class StateManager:
         self.state.name_cache[key] = name
         self.save()
 
+    def get_cached_media_type(self, root_key: str) -> str | None:
+        return self.state.media_type_cache.get(root_key)
+
+    def set_cached_media_type(self, root_key: str, media_type: str) -> None:
+        self.state.media_type_cache[root_key] = media_type
+        self.save()
+
     def clear_name_cache(self) -> int:
         count = len(self.state.name_cache)
         self.state.name_cache.clear()
+        self.state.media_type_cache.clear()
         self.save()
         return count
+
+    def remove_cached_names(self, keys: list[str]) -> int:
+        """Remove specific cache entries by Merkle key. Returns number removed."""
+        removed = 0
+        for k in keys:
+            if k in self.state.name_cache:
+                del self.state.name_cache[k]
+                removed += 1
+            # root key may also be in media_type_cache
+            self.state.media_type_cache.pop(k, None)
+        if removed:
+            self.save()
+        return removed
 
     # --- Serialization ---
 
@@ -173,6 +194,7 @@ class StateManager:
             "target_sections": sections,
             "entries": entries,
             "name_cache": state.name_cache,
+            "media_type_cache": state.media_type_cache,
         }
 
     @staticmethod
@@ -213,4 +235,5 @@ class StateManager:
             entries=entries,
             settings=raw.get("settings", {}),
             name_cache=raw.get("name_cache", {}),
+            media_type_cache=raw.get("media_type_cache", {}),
         )

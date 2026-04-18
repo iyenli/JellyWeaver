@@ -43,11 +43,22 @@ def create_app() -> FastAPI:
             manager.disconnect(ws)
 
     # Serve frontend static files (production build)
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
     if getattr(sys, "frozen", False):
         static_dir = Path(sys._MEIPASS) / "jelly_weaver" / "static"
+        _log.info("Frozen mode: _MEIPASS=%s", sys._MEIPASS)
+        # List _MEIPASS contents to aid debugging
+        try:
+            _log.info("_MEIPASS contents: %s", [p.name for p in Path(sys._MEIPASS).iterdir()])
+        except Exception as e:
+            _log.warning("Cannot list _MEIPASS: %s", e)
     else:
         static_dir = Path(__file__).parent.parent / "static"
+    _log.info("static_dir=%s exists=%s", static_dir, static_dir.is_dir())
     if static_dir.is_dir():
         app.mount("/", StaticFiles(directory=str(static_dir), html=True))
+    else:
+        _log.warning("Static dir not found, frontend will not be served")
 
     return app
